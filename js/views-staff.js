@@ -299,6 +299,74 @@ function moreNote(n) { return n ? '<div class="more-note">還有 ' + n + ' 位�
   }
 })();
 
+
+/* ================== 全部貴賓狀態（所有組別共用・唯讀） ================== */
+(function () {
+  var st = {mode: 'guest', f: 'all', q: ''};
+  var root;
+  var STEPS = [['pk', '接到'], ['dl', '送達'], ['ci', '報到'], ['cl', '帶領'], ['se', '入座'], ['an', '唱名']];
+  var FL = [['all', '全部'], ['none', '尚未開始'], ['pk', '接送中'], ['dl', '已到門口'], ['ci', '已報到'], ['cl', '帶領中'], ['se', '已入座'], ['an', '已唱名']];
+  function key(r) { return U.stageKey(r) || 'none'; }
+  function stepsHtml(r) {
+    return '<div class="ag-steps">' + STEPS.map(function (x) {
+      var k = x[0], t = r[k];
+      if (t) return '<div class="stp on"><span class="sl">' + x[1] + '</span><span class="stt">' + T(t) + '</span><span class="sb">' + esc(r[k + 'By'] || '') + '</span></div>';
+      var na = (k === 'pk' || k === 'dl') && !U.isTr(r);
+      return '<div class="stp' + (na ? ' na' : '') + '"><span class="sl">' + x[1] + '</span><span class="stt">' + (na ? '無接送' : '—') + '</span><span class="sb"></span></div>';
+    }).join('') + '</div>';
+  }
+  function row(r) {
+    var k = key(r), lab = (FL.filter(function (x) { return x[0] === k; })[0] || [0, ''])[1];
+    return '<div class="card ag s-' + k + '" data-id="' + r.id + '"><div class="ag-h">' + seqBadge(r) + '<div class="ag-n"><b>' + esc(r.name) + '</b><span class="ag-sub">' + esc(U.addrName(r)) + '</span></div>' +
+      '<span class="ag-st s-' + k + '">' + lab + '</span><span class="tbl-badge sm">' + esc(U.tblLabel(r.tbl) || '未排桌') + '</span></div>' +
+      '<div class="g-meta">' + tags(r) + (r.tr ? '<span class="tag">🚐 ' + esc(r.tr) + (r.veh ? ' ' + esc(r.veh) : '') + '</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
+  }
+  function tablesHtml(arr) {
+    var m = {}, keys = [];
+    arr.forEach(function (r) { var k = String(r.tbl || '').trim(); if (!m[k]) { m[k] = []; keys.push(k); } m[k].push(r); });
+    keys.sort(function (a, b) { return U.tblNum(a) - U.tblNum(b) || a.localeCompare(b); });
+    return keys.map(function (k) {
+      var g = m[k], seated = g.filter(function (r) { return r.se; }).length, arrived = g.filter(function (r) { return r.ci; }).length;
+      return '<div class="card tb"><div class="tb-h"><span class="tbl-badge sm">' + esc(U.tblLabel(k) || '未排桌') + '</span><span class="tb-c">入座 <b>' + seated + '</b>／報到 <b>' + arrived + '</b>／共 ' + g.length + '</span></div><div class="tb-g">' +
+        g.sort(function (a, b) { return (a.seq || 0) - (b.seq || 0); }).map(function (r) {
+          var kk = key(r);
+          return '<span class="tb-p s-' + kk + '" title="' + esc(r.name) + (r.se ? '・入座 ' + T(r.se) : r.ci ? '・報到 ' + T(r.ci) : '') + '">' + esc(r.name) + '<i>' + (r.an ? '🎤' : r.se ? '🪑' : r.ci ? '✅' : '') + '</i></span>';
+        }).join('') + '</div></div>';
+    }).join('');
+  }
+  function upd() {
+    if (!root) return;
+    var all = V.list(), cnt = {all: all.length};
+    all.forEach(function (r) { var k = key(r); cnt[k] = (cnt[k] || 0) + 1; });
+    var q = st.q.trim();
+    $('#afl', root).innerHTML = FL.map(function (x) { return chip(x[1] + ' <b>' + (cnt[x[0]] || 0) + '</b>', st.f === x[0], 'data-f="' + x[0] + '"'); }).join('');
+    $('#amd', root).innerHTML = chip('👤 依貴賓', st.mode === 'guest', 'data-m="guest"') + chip('🪑 依桌次', st.mode === 'table', 'data-m="table"');
+    var arr = all.filter(function (r) { return (st.f === 'all' || key(r) === st.f) && U.matches(r, q); });
+    arr.sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); });
+    var out;
+    if (st.mode === 'table') out = tablesHtml(arr) || '<div class="empty">沒有符合的貴賓</div>';
+    else { var c = capList(arr, 100); out = c.items.map(row).join('') + moreNote(c.more); if (!arr.length) out = '<div class="empty">沒有符合的貴賓</div>'; }
+    $('#alist', root).innerHTML = out;
+    $('#acount', root).textContent = '共 ' + arr.length + ' 位';
+  }
+  V.views.all = {
+    mount: function (r) {
+      root = r;
+      r.innerHTML = '<div class="ro-note">👀 唯讀檢視：這裡看得到所有組別、每位貴賓目前的進度與時間。要操作請按上方「我的工作」。</div>' +
+        '<div class="bar"><input id="aq" class="inp search" placeholder="🔍 搜尋姓名／單位／桌次／車號" autocomplete="off"></div>' +
+        '<div class="chips scroll" id="afl"></div><div class="chips" id="amd"></div><div class="muted small ag-count" id="acount"></div><div id="alist" class="cards"></div>';
+      $('#aq', r).value = st.q;
+      $('#aq', r).oninput = debounce(function (e) { st.q = e.target.value; upd(); }, 120);
+      r.onclick = function (e) {
+        var b = e.target.closest('[data-f],[data-m]'); if (!b) return;
+        if (b.dataset.f) st.f = b.dataset.f; if (b.dataset.m) st.mode = b.dataset.m; upd();
+      };
+    },
+    update: upd,
+    unmount: function () { root = null; }
+  };
+})();
+
 V.printHtml = function (html) {
   var d = document.createElement('div'); d.id = 'print-host'; d.innerHTML = html; document.body.appendChild(d);
   document.body.classList.add('printing');

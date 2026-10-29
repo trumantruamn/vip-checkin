@@ -251,17 +251,21 @@ function linkBase() { return location.origin + location.pathname.replace(/[^/]*$
 function paneCodes(p) {
   function draw(codes) {
     var base = linkBase(), extra = (!window.VIP_CONFIG.API_URL && V.apiUrl && !V.demo) ? '&api=' + encodeURIComponent(V.apiUrl) : '';
-    var h = '<div class="pnl"><h3>🔑 各組存取碼與連結</h3><p class="muted">把連結用 LINE 傳給各組負責人，點開就直接進入該組畫面（每個組別只看得到自己的畫面）。' + (V.demo ? '<br><b>預覽模式：連結只在這個瀏覽器有效。</b>' : '') + '</p>';
-    ['transport', 'checkin', 'reception', 'stage', 'director'].forEach(function (k) {
-      var c = codes[k] || '', link = base + '?c=' + c + extra;
-      h += '<div class="coderow"><div class="cr-h"><b>' + V.ROLES[k].icon + ' ' + V.ROLES[k].name + '</b> <span class="muted small">' + V.ROLES[k].desc + '</span></div><div class="cr-c">' + esc(c) + '</div><input class="inp sm" readonly value="' + esc(link) + '" onclick="this.select()">' +
-        '<div class="cr-b"><button class="btn sm" data-copy="' + esc(link) + '">複製連結</button><a class="btn sm" target="_blank" rel="noopener" href="https://line.me/R/msg/text/?' + encodeURIComponent(V.ROLES[k].name + '報到系統連結（存取碼 ' + c + '）\n' + link) + '">LINE 分享</a><a class="btn sm" target="_blank" href="' + esc(link) + '">開啟</a><button class="btn sm danger" data-regen="' + k + '">重新產生</button></div></div>';
+    var h = '<div class="pnl"><h3>🔑 存取碼與連結</h3><p class="muted">只有兩組碼：<b>工作人員共用碼</b>（四個工作組共用，登入後在手機上選自己的組別）與<b>總召專用碼</b>（只能看、不能操作）。' + (V.demo ? '<br><b>預覽模式：連結只在這個瀏覽器有效。</b>' : '') + '</p>';
+    var defs = [
+      ['staff', '👥 工作人員共用碼', '交通組・報到組・接待組・舞台組 共用', '登入後自己選組別，隨時可切換。每一組只能按自己負責的步驟，但看得到所有組別的進度。', '工作人員報到系統連結'],
+      ['director', '📊 活動總召專用碼', '只能看，不能操作', '即時總覽儀表板，無法按任何動作按鈕。', '活動總召儀表板連結']
+    ];
+    defs.forEach(function (d) {
+      var k = d[0], c = codes[k] || '', link = base + '?c=' + c + extra;
+      h += '<div class="coderow" data-code-role="' + k + '"><div class="cr-h"><b>' + d[1] + '</b> <span class="muted small">' + d[2] + '</span></div><div class="cr-note">' + d[3] + '</div><div class="cr-c">' + esc(c) + '</div><input class="inp sm" readonly value="' + esc(link) + '" onclick="this.select()">' +
+        '<div class="cr-b"><button class="btn sm" data-copy="' + esc(link) + '">複製連結</button><a class="btn sm" target="_blank" rel="noopener" href="https://line.me/R/msg/text/?' + encodeURIComponent(d[4] + '（存取碼 ' + c + '）\n' + link) + '">LINE 分享</a><a class="btn sm" target="_blank" href="' + esc(link) + '">開啟</a><button class="btn sm danger" data-regen="' + k + '">重新產生</button></div></div>';
     });
     h += '<div class="coderow"><div class="cr-h"><b>⚙️ 後台管理</b></div><div class="muted">使用你在 Apps Script「指令碼屬性」設定的 ADMIN_CODE（管理密碼）登入' + (V.demo ? '（預覽版：這個頁面已用管理權限登入）' : '') + '。請勿傳給他人。</div></div></div>';
     p.innerHTML = h;
     p.querySelectorAll('[data-copy]').forEach(function (b) { b.onclick = function () { (navigator.clipboard ? navigator.clipboard.writeText(b.dataset.copy) : Promise.reject()).then(function () { V.toast('已複製連結'); }, function () { prompt('請手動複製：', b.dataset.copy); }); }; });
     p.querySelectorAll('[data-regen]').forEach(function (b) { b.onclick = function () {
-      V.confirm('重新產生「' + V.ROLES[b.dataset.regen].name + '」存取碼？舊連結會立即失效。', '重新產生', true).then(function (ok) { if (ok) admin('codes.regen', {roles: [b.dataset.regen]}).then(function (r) { draw(r.codes); }).catch(err); });
+      V.confirm('重新產生「' + (b.dataset.regen === 'staff' ? '工作人員共用碼' : '總召專用碼') + '」？舊碼與舊連結會立即失效，' + (b.dataset.regen === 'staff' ? '所有工作人員的手機都需要重新輸入新碼。' : '總召需要用新碼重新登入。'), '重新產生', true).then(function (ok) { if (ok) admin('codes.regen', {roles: [b.dataset.regen]}).then(function (r) { draw(r.codes); }).catch(err); });
     }; });
   }
   admin('codes.get').then(function (r) { draw(r.codes); }).catch(err);
@@ -284,8 +288,8 @@ function exportXlsx() {
     var all = V.list(), exp = all.filter(U.isExpected), cnt = function (f) { return all.filter(f).length; };
     var sum = [['活動', S.ev ? S.ev.name : ''], ['日期', S.ev ? S.ev.date : ''], ['匯出時間', U.fmtDT(Date.now())], [], ['預計出席', exp.length], ['已接到', cnt(function (r) { return r.pk; })], ['已送達門口', cnt(function (r) { return r.dl; })], ['已報到', cnt(function (r) { return r.ci; })], ['  其中現場新增', cnt(function (r) { return r.walk; })], ['已入座', cnt(function (r) { return r.se; })], ['已唱名', cnt(function (r) { return r.an; })], ['未到（預計出席）', exp.filter(function (r) { return !r.ci; }).length]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), '統計');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['時間', '活動', '角色', '人員', '裝置', '貴賓', '動作', '說明']].concat(lg.log || [])), '操作紀錄');
-    var name = (S.ev ? S.ev.name : '活動') + '_報到結果_' + U.fmtDT(Date.now()).replace(/[-: ]/g, '').slice(0, 12) + '.xlsx';
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['時間', '活動', '組別／角色', '人員', '裝置', '貴賓', '動作', '說明']].concat((lg.log || []).map(function (x) { x = x.slice(); if (V.ROLES[x[2]]) x[2] = V.ROLES[x[2]].name; return x; }))), '操作紀錄');
+    var name = (S.ev ? S.ev.name : '活動').replace(/[\\\/:*?"<>|\s]+/g, ' ').trim().slice(0, 40) + '_報到結果_' + U.fmtDT(Date.now()).replace(/[-: ]/g, '').slice(0, 12) + '.xlsx';
     XLSX.writeFile(wb, name);
     V.toast('已匯出 Excel');
   });

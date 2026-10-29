@@ -3,7 +3,7 @@
 'use strict';
 var V = window.VIP, S = V.S, U = V.u, esc = U.esc, T = U.fmtT;
 function $(s, r) { return (r || document).querySelector(s); }
-var root, q = '', nCat = '';
+var root, q = '', nCat = '', selT = null;
 var BUCKET = 10 * 60000;
 
 function pct(a, b) { return b ? Math.round(a * 100 / b) : 0; }
@@ -64,11 +64,45 @@ function tableGrid(c) {
   var h = '<div class="tgrid">';
   keys.forEach(function (k) {
     var x = t[k], full = x.se >= x.n && x.n > 0, started = x.ci > 0;
-    h += '<div class="tt' + (full ? ' full' : started ? ' part' : '') + '"><div class="tt-n">' + esc(U.tblLabel(k)) + '</div><div class="tt-v"><b>' + x.se + '</b>/' + x.n + '</div><div class="tt-s">到 ' + x.ci + '</div><div class="tt-bar"><i class="a" style="width:' + pct(x.ci, x.n) + '%"></i><i class="b" style="width:' + pct(x.se, x.n) + '%"></i></div></div>';
+    h += '<div class="tt' + (full ? ' full' : started ? ' part' : '') + (k === selT ? ' sel' : '') + '" role="button" tabindex="0" data-tbl="' + esc(k) + '" aria-label="' + esc(U.tblLabel(k)) + '，點開看名單"><div class="tt-n">' + esc(U.tblLabel(k)) + '</div><div class="tt-v"><b>' + x.se + '</b>/' + x.n + '</div><div class="tt-s">到 ' + x.ci + '</div><div class="tt-bar"><i class="a" style="width:' + pct(x.ci, x.n) + '%"></i><i class="b" style="width:' + pct(x.se, x.n) + '%"></i></div></div>';
   });
   var un = c.all.filter(function (r) { return !r.tbl; }).length;
   return h + '</div>' + (un ? '<div class="muted small">另有 ' + un + ' 位尚未排桌次</div>' : '');
 }
+var STEPS = [['pk', '接到'], ['dl', '送達'], ['ci', '報到'], ['cl', '帶領'], ['se', '入座'], ['an', '唱名']];
+function stepsHtml(r) {
+  return '<div class="ag-steps">' + STEPS.map(function (x) {
+    var k = x[0], t = r[k];
+    if (t) return '<div class="stp on"><span class="sl">' + x[1] + '</span><span class="stt">' + T(t) + '</span><span class="sb">' + esc(r[k + 'By'] || '') + '</span></div>';
+    var na = (k === 'pk' || k === 'dl') && !U.isTr(r);
+    return '<div class="stp' + (na ? ' na' : '') + '"><span class="sl">' + x[1] + '</span><span class="stt">' + (na ? '無接送' : '—') + '</span><span class="sb"></span></div>';
+  }).join('') + '</div>';
+}
+var SL = {none: '尚未開始', pk: '接送中', dl: '已到門口', ci: '已報到', cl: '帶領中', se: '已入座', an: '已唱名'};
+function guestRow(r) {
+  var k = U.stageKey(r) || 'none', tg = '';
+  if (r.cat) tg += '<span class="tag">' + esc(r.cat) + '</span>';
+  if (r.grp) tg += '<span class="tag grp">' + esc(r.grp) + '</span>';
+  if (r.walk) tg += '<span class="tag walk">現場新增</span>';
+  if (r.rsvp === '代理出席') tg += '<span class="tag warn">代理出席</span>';
+  return '<div class="card ag s-' + k + '" data-id="' + r.id + '"><div class="ag-h">' + (r.seq && r.seq < 99999 ? '<span class="seq">' + r.seq + '</span>' : '<span class="seq new">新</span>') + '<div class="ag-n"><b>' + esc(r.name) + '</b><span class="ag-sub">' + esc(U.addrName(r)) + '</span></div><span class="ag-st s-' + k + '">' + SL[k] + '</span></div>' +
+    '<div class="g-meta">' + tg + (r.tr ? '<span class="tag">🚐 ' + esc(r.tr) + '</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
+}
+function tableDetail(c) {
+  var g = c.all.filter(function (r) { return String(r.tbl || '') === selT; }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999) || String(a.name).localeCompare(String(b.name)); });
+  var ci = g.filter(function (r) { return r.ci; }).length, se = g.filter(function (r) { return r.se; }).length, an = g.filter(function (r) { return r.an; }).length;
+  return '<div class="td-h"><div><h3>🪑 ' + esc(U.tblLabel(selT)) + '</h3><div class="td-sum">共 <b>' + g.length + '</b> 位・已報到 <b>' + ci + '</b>・已入座 <b>' + se + '</b>・已唱名 <b>' + an + '</b></div></div><button class="btn td-x" id="td-close" aria-label="關閉">✕ 關閉</button></div>' +
+    '<div class="td-body">' + (g.length ? g.map(guestRow).join('') : '<div class="empty">這桌目前沒有貴賓</div>') + '</div><div class="td-live muted small">即時更新・' + T(Date.now()) + '</div>';
+}
+function renderDetail() {
+  var el = $('#tdet', root); if (!el) return;
+  if (selT == null) { el.style.display = 'none'; el.innerHTML = ''; document.body.classList.remove('td-open'); return; }
+  var body = $('.td-body', el), top = body ? body.scrollTop : 0;
+  el.style.display = ''; el.innerHTML = tableDetail(compute()); document.body.classList.add('td-open');
+  var nb = $('.td-body', el); if (nb) nb.scrollTop = top;
+}
+function openTable(k) { selT = k; V.views.director.update(); var b = $('#td-close', root); if (b) b.focus(); }
+function closeTable() { selT = null; V.views.director.update(); }
 function absentList(c) {
   var arr = c.absent.filter(function (r) { return (!nCat || r.cat === nCat) && U.matches(r, q); }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); });
   var h = '<div class="muted small">未到 ' + c.absent.length + ' 位' + (arr.length !== c.absent.length ? '，符合 ' + arr.length + ' 位' : '') + '</div><div class="alist">';
@@ -107,7 +141,7 @@ function staffTable(c) {
 V.views.director = {
   mount: function (r) {
     root = r;
-    r.innerHTML = '<div class="dash"><div id="kpis" class="kpis"></div>' +
+    r.innerHTML = '<div class="dash"><h2 class="ev-title" id="evt"></h2><div id="kpis" class="kpis"></div>' +
       '<section class="pnl"><h3>📈 報到趨勢</h3><div id="trend"></div></section>' +
       '<section class="pnl"><h3>🗂 各類別進度</h3><div id="cats"></div></section>' +
       '<section class="pnl wide"><h3>🪑 各桌狀況 <span class="muted small">（入座／應到，下方淺色條＝已報到）</span></h3><div id="tables"></div></section>' +
@@ -116,10 +150,23 @@ V.views.director = {
       '<section class="pnl wide"><h3>⏳ 尚未抵達名單</h3><div class="bar"><input id="aq" class="inp search" placeholder="搜尋未到貴賓"><select id="acat" class="inp sm"></select></div><div id="absent"></div></section></div>';
     $('#aq', r).oninput = function (e) { q = e.target.value; V.views.director.update(); };
     $('#acat', r).onchange = function (e) { nCat = e.target.value; V.views.director.update(); };
+    r.insertAdjacentHTML('beforeend', '<div id="tdet-bg" class="tdet-bg" style="display:none"></div><div id="tdet" class="tdet" role="dialog" aria-label="桌次名單" style="display:none"></div>');
+    r.onclick = function (e) {
+      var t = e.target.closest ? e.target.closest('[data-tbl]') : null;
+      if (t && r.contains(t)) return openTable(t.getAttribute('data-tbl'));
+      if (e.target.closest && (e.target.closest('#td-close') || e.target.id === 'tdet-bg')) closeTable();
+    };
+    r.onkeydown = function (e) {
+      var t = e.target.closest ? e.target.closest('[data-tbl]') : null;
+      if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openTable(t.getAttribute('data-tbl')); }
+    };
+    this.esc = function (e) { if (e.key === 'Escape' && selT != null) closeTable(); };
+    document.addEventListener('keydown', this.esc);
     this.timer = setInterval(function () { V.views.director.update(); }, 20000);
   },
-  unmount: function () { clearInterval(this.timer); },
+  unmount: function () { clearInterval(this.timer); document.removeEventListener('keydown', this.esc); selT = null; document.body.classList.remove('td-open'); },
   update: function () {
+    var et = $('#evt', root); if (et) { var en = S.ev ? S.ev.name : ''; if (et.textContent !== en) et.textContent = en; et.style.display = en ? '' : 'none'; }
     if (!root) return;
     var c = compute();
     $('#kpis', root).innerHTML =
@@ -137,6 +184,8 @@ V.views.director = {
     $('#staff', root).innerHTML = staffTable(c);
     var ac = $('#acat', root); if (ac.options.length - 1 !== ((S.ev && S.ev.cats) || []).length) ac.innerHTML = V.catOptions(nCat, true);
     $('#absent', root).innerHTML = absentList(c);
+    var bg = $('#tdet-bg', root); if (bg) bg.style.display = selT != null ? '' : 'none';
+    renderDetail();
   }
 };
 })();

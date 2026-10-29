@@ -5,6 +5,7 @@ var KEY = 'vipdemo.world', gas = null;
 function make() {
   gas = window.GasMock.create({source: window.VIPDEMO_SRC, adminCode: 'admin', store: {get: function () { return localStorage.getItem(KEY); }, set: function (s) { localStorage.setItem(KEY, s); }}});
 }
+function U_lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function call(o) { return JSON.parse(gas.handle(JSON.stringify(o))); }
 function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 var SUR = '陳林黃張李王吳劉蔡楊許鄭謝郭洪曾邱廖賴徐周葉蘇莊呂江何蕭羅高潘簡朱鍾游彭詹胡施沈余盧'.split('');
@@ -38,7 +39,7 @@ function genRows(seed) {
 }
 function seedBase() {
   localStorage.removeItem(KEY); make();
-  var a = call({op: 'admin', code: 'admin', cmd: 'event.create', name: '2026 感恩晚宴（示範）', date: '2026-10-31', staff: '慶哥'});
+  var a = call({op: 'admin', code: 'admin', cmd: 'event.create', name: '2026屏東縣創新創業協會第29、30屆 理事長交接曁理監事會務幹部就職典禮', date: '2026-10-31', staff: '慶哥'});
   var ev = a.event.id, rows = genRows(20261031);
   for (var i = 0; i < rows.length; i += 200) call({op: 'admin', code: 'admin', ev: ev, cmd: 'guests.import', mode: 'replace', start: i === 0, rows: rows.slice(i, i + 200), staff: '慶哥'});
   return {ev: ev, codes: a.codes};
@@ -71,7 +72,7 @@ function seedLive(info) {
   ['transport', 'checkin', 'reception', 'stage'].forEach(function (role) {
     Object.keys(per[role]).forEach(function (st) {
       var acts = per[role][st];
-      for (var i = 0; i < acts.length; i += 40) call({op: 'sync', code: codes[role], ev: info.ev, since: 0, staff: st, dev: 'demo', acts: acts.slice(i, i + 40)});
+      for (var i = 0; i < acts.length; i += 40) call({op: 'sync', code: codes.staff, sg: role, ev: info.ev, since: 0, staff: st, dev: 'demo', acts: acts.slice(i, i + 40).map(function (a) { a.gr = role; return a; })});
     });
   });
 }
@@ -84,21 +85,24 @@ window.VIPDEMO = {
     if (new URLSearchParams(location.search).get('demo') === 'reset') { seed('live'); history.replaceState(null, '', location.pathname); }
     var r = call({op: 'login', code: 'admin'});
     if (!r.ok || !r.events || !r.events.length) seed('live');
-    window.VIP.defaultName = function () { return {transport: '王師傅', checkin: '小美', reception: '接待1號', stage: '司儀小林', director: '總召', admin: '慶哥'}[window.VIP.S.role] || ''; };
+    window.VIP.defaultName = function () { return {transport: '王師傅', checkin: '小美', reception: '接待1號', stage: '司儀小林', director: '總召', admin: '慶哥'}[window.VIP.S.role === 'staff' ? window.VIP.S.grp : window.VIP.S.role] || ''; };
     return Promise.resolve();
   },
   resetAll: function (scn) {
-    Object.keys(localStorage).forEach(function (k) { if (/^vip\.(st|lastrole)/.test(k)) localStorage.removeItem(k); });
+    Object.keys(localStorage).forEach(function (k) { if (/^vip\.(st|lastrole|grp)/.test(k)) localStorage.removeItem(k); });
     seed(scn || 'live'); location.href = location.pathname;
   },
   launcher: function (el, tools, enter) {
     var r = call({op: 'login', code: 'admin'}), ev = r.events[0], codes = call({op: 'admin', code: 'admin', ev: ev.id, cmd: 'codes.get'}).codes;
-    var items = [['transport', '🚐 交通組'], ['checkin', '✅ 報到組'], ['reception', '🤝 接待組'], ['stage', '🎤 舞台組（司儀）'], ['director', '📊 活動總召'], ['admin', '⚙️ 後台管理']];
-    el.innerHTML = items.map(function (x) {
-      var c = x[0] === 'admin' ? 'admin' : codes[x[0]];
-      return '<div class="dl"><button class="btn primary" data-go="' + c + '">' + x[1] + '</button><a class="btn sm" target="_blank" href="?c=' + encodeURIComponent(c) + '">新分頁</a></div>';
+    var items = [['transport', '🚐 交通組'], ['checkin', '✅ 報到組'], ['reception', '🤝 接待組'], ['stage', '🎤 舞台組（司儀）'], ['director', '📊 活動總召（專用碼）'], ['admin', '⚙️ 後台管理']];
+    var h = '<div class="muted small demo-code">工作人員「共用存取碼」：<b id="demo-staffcode">' + codes.staff + '</b>　（四個組別都用這一組，登入後再選組別）<br>總召專用碼：<b>' + codes.director + '</b>　後台密碼：<b>admin</b>（僅示範用）</div>';
+    h += items.map(function (x) {
+      var g = ['transport', 'checkin', 'reception', 'stage'].indexOf(x[0]) >= 0, c = x[0] === 'admin' ? 'admin' : g ? codes.staff : codes[x[0]];
+      return '<div class="dl"><button class="btn primary" data-go="' + c + '"' + (g ? ' data-grp="' + x[0] + '"' : '') + '>' + x[1] + '</button><a class="btn sm" target="_blank" href="?c=' + encodeURIComponent(c) + (g ? '#' + x[0] : '') + '">新分頁</a></div>';
     }).join('');
-    el.onclick = function (e) { var b = e.target.closest('[data-go]'); if (b) enter(b.dataset.go); };
+    el.innerHTML = h;
+    el.onclick = function (e) { var b = e.target.closest('[data-go]'); if (b) { if (b.dataset.grp) U_lsSet('vip.grp', b.dataset.grp); enter(b.dataset.go); } };
+    var lge = document.getElementById('lg-ev'); if (lge) { lge.textContent = ev.name; lge.style.display = ''; }
     tools.innerHTML = '<div class="muted small">目前活動：' + ev.name + '</div><button class="btn sm" id="dr1">重新產生：進行中情境（約 55% 已到）</button> <button class="btn sm" id="dr2">重新產生：全新未開始</button>';
     tools.querySelector('#dr1').onclick = function () { window.VIPDEMO.resetAll('live'); };
     tools.querySelector('#dr2').onclick = function () { window.VIPDEMO.resetAll('fresh'); };

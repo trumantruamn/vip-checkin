@@ -14,6 +14,7 @@ window.VIP_CONFIG = {
     logoH: 'img/logo-h.png',            // 橫式 logo（每個畫面上方）
     logoV: 'img/logo-v.png',            // 直式 logo（登入頁）
     favicon: 'img/favicon.png',         // 網頁小圖示
-    themeColor: '#78BFBB'               // 手機瀏覽器網址列顏色
+    themeColor: '#78BFBB',              // 手機瀏覽器網址列顏色
+    eventName: ''                       // 登入頁要顯示的活動全名（可留空；工作人員登入過一次後，登入頁會自動記住）
   }
 };

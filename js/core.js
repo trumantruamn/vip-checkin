@@ -3,7 +3,7 @@
 'use strict';
 var CFG = window.VIP_CONFIG || {};
 var BRAND = (function () {
-  var d = {name: '三恆一樹', en: 'TREE OF ETERNITY', appName: '貴賓報到系統', logoH: 'img/logo-h.png', logoV: 'img/logo-v.png', favicon: 'img/favicon.png', themeColor: '#78BFBB'};
+  var d = {name: '三恆一樹', en: 'TREE OF ETERNITY', appName: '貴賓報到系統', logoH: 'img/logo-h.png', logoV: 'img/logo-v.png', favicon: 'img/favicon.png', themeColor: '#78BFBB', eventName: ''};
   var b = CFG.BRAND || {}; for (var k in b) if (b[k] !== undefined && b[k] !== null) d[k] = b[k];
   return d;
 })();
@@ -39,7 +39,8 @@ var STAGES = {
   ci: {label: '已報到', role: 'checkin'}, cl: {label: '帶領中', role: 'reception'},
   se: {label: '已入座', role: 'reception'}, an: {label: '已唱名', role: 'stage'}
 };
-V.ROLES = ROLES; V.STAGES = STAGES;
+var GROUPS = ['transport', 'checkin', 'reception', 'stage'];
+V.ROLES = ROLES; V.STAGES = STAGES; V.GROUPS = GROUPS;
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
 var tfmt = new Intl.DateTimeFormat('zh-TW', {timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false});
 var tfmtS = new Intl.DateTimeFormat('zh-TW', {timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
@@ -100,7 +101,7 @@ function api(body) {
 V.api = api;
 
 /* ---------- 資料倉 ---------- */
-var S = V.S = {code: '', role: '', ev: null, evId: '', base: {}, ver: 0, epoch: 0, mv: 0, have: false, pending: [], online: true, lastOk: 0, staff: '', dev: lsGet('vip.dev', ''), events: null};
+var S = V.S = {code: '', role: '', grp: '', ev: null, evId: '', base: {}, ver: 0, epoch: 0, mv: 0, have: false, pending: [], online: true, lastOk: 0, staff: '', dev: lsGet('vip.dev', ''), events: null};
 function staffKey() { return 'vip.staff.' + (S.role || ''); }
 if (!S.dev) { S.dev = 'D' + uid(5); lsSet('vip.dev', S.dev); }
 var subs = [], listCache = null, listVer = 0;
@@ -167,6 +168,7 @@ function restore() {
 /* 送出動作（先樂觀更新，再進佇列） */
 V.act = function (act) {
   act.cid = uid(10); act.t = Date.now();
+  if (S.role === 'staff') act.gr = S.grp;   // 共用碼：動作以「當下選的組別」授權（離線佇列也保留）
   S.pending.push(act); listCache = null; persist(); notify(); kick(60);
   return act.cid;
 };
@@ -188,8 +190,8 @@ function cycle() {
   busy = true;
   var sent = S.pending.slice(0, 30), now = Date.now();
   var force = forceNext || (now - lastForce > 60000);
-  var body = {op: 'sync', code: S.code, ev: S.evId, since: S.ver, epoch: S.epoch, mv: S.mv, have: S.have, staff: S.staff, dev: S.dev, force: force,
-    acts: sent.map(function (a) { return {cid: a.cid, a: a.a, g: a.g, s: a.s, on: a.on, f: a.f, age: now - a.t}; })};
+  var body = {op: 'sync', code: S.code, ev: S.evId, since: S.ver, epoch: S.epoch, mv: S.mv, have: S.have, staff: S.staff, dev: S.dev, force: force, sg: S.role === 'staff' ? S.grp : undefined,
+    acts: sent.map(function (a) { return {cid: a.cid, a: a.a, g: a.g, s: a.s, on: a.on, f: a.f, gr: a.gr, age: now - a.t}; })};
   if (!sent.length) delete body.acts;
   api(body).then(function (r) {
     busy = false;
@@ -287,18 +289,79 @@ var curView = null, curUnsub = null;
 function shell() {
   document.getElementById('app').innerHTML =
     '<header class="top"><div class="top-l">' + (BRAND.logoH ? '<img class="brand-logo" src="' + esc(BRAND.logoH) + '" alt="' + esc(BRAND.name + ' ' + BRAND.en) + '">' : '') + '<span class="role-badge" id="hd-role"></span><span class="ev-name" id="hd-ev"></span></div>' +
-    '<div class="top-r"><span class="sync ok" id="sync-dot"></span><span id="sync-txt" class="sync-txt">已同步</span><button class="icon-btn" id="hd-menu" aria-label="選單">☰</button></div></header>' +
+    '<div class="top-r"><span class="sync ok" id="sync-dot"></span><span id="sync-txt" class="sync-txt">已同步</span><button class="icon-btn" id="hd-menu" aria-label="選單">☰</button></div>' + navHtml() + '</header>' +
+    '<div class="ev-bar" id="hd-ev2"></div>' + (S.role === 'staff' ? '<nav class="grp-tabs" id="grp-tabs" aria-label="切換組別"></nav>' : '') +
     (DEMO ? '<div class="demo-bar">🧪 預覽／示範模式：資料只存在這個瀏覽器，內容皆為虛構。多開幾個分頁＝模擬多台裝置。<a href="?" id="demo-home">回到示範入口</a></div>' : '') +
     '<main id="view"></main>' + brandFoot();
   document.getElementById('hd-menu').onclick = menu;
+  var dh = document.getElementById('demo-home'); if (dh) dh.onclick = function (e) { e.preventDefault(); V.demoHome(); };
+  var nv = document.getElementById('hd-nav');
+  nv.onclick = function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'tn-sw') V.switchGroup();
+    else if (b.id === 'tn-home') { V.goHome(); }
+    else if (b.id === 'tn-demo') V.demoHome();
+    else if (b.id === 'tn-out') V.confirmLogout();
+  };
+  var gt = document.getElementById('grp-tabs');
+  if (gt) gt.onclick = function (e) { var b = e.target.closest('[data-grp]'); if (b) V.setGroup(b.dataset.grp); };
   updateHeader();
+}
+/* 頂端永遠看得到的導覽列：回首頁／換組別／（示範入口）／登出 */
+function navHtml() {
+  var l = S.role === 'staff' ? '<button class="tn" id="tn-sw" title="回到組別選擇，不用重新輸入存取碼">🔀 換組別</button>'
+    : '<button class="tn" id="tn-home">🏠 ' + (S.role === 'admin' ? '後台首頁' : '首頁') + '</button>';
+  if (DEMO) l += '<button class="tn" id="tn-demo">🧪 示範入口</button>';
+  return '<nav class="top-nav" id="hd-nav" aria-label="首頁／換組別／登出">' + l + '<span class="tn-sp"></span><button class="tn tn-out" id="tn-out">🚪 登出</button></nav>';
+}
+V.goHome = function () {
+  if (S.role === 'admin' || S.role === 'director') { showView(S.role); window.scrollTo(0, 0); }
+};
+V.confirmLogout = function () {
+  var n = S.pending.length;
+  return confirmBox('確定要登出嗎？<br>登出後這台裝置要重新輸入存取碼才能再進入。' + (n ? '<br><b style="color:#b3261e">還有 ' + n + ' 筆動作尚未送出，登出會遺失！</b>' : ''), '登出', true).then(function (ok) { if (ok) V.logout(); return ok; });
+};
+V.demoHome = function () {
+  return confirmBox('回到示範入口？<br>這會登出目前的示範身分（示範資料會保留，可再從入口進入）。', '回到入口', false).then(function (ok) { if (ok) V.logout(); return ok; });
+};
+/* 共用碼登入後：回到「選組別」畫面（不用重新輸入共用碼；已排隊的動作保留） */
+V.switchGroup = function () {
+  if (S.role !== 'staff') return;
+  if (curView && curView.unmount) curView.unmount();
+  curView = null; if (curUnsub) { curUnsub(); curUnsub = null; }
+  S.grp = ''; V.viewRole = ''; V.panel = 'mine'; lsDel('vip.grp');
+  history.replaceState(null, '', location.pathname + location.search);
+  groupPicker(launchStaff);
+};
+function renderGrpTabs() {
+  var gt = document.getElementById('grp-tabs'); if (!gt) return;
+  gt.innerHTML = GROUPS.map(function (k) { return '<button class="gt' + (S.grp === k ? ' on' : '') + '" data-grp="' + k + '" aria-pressed="' + (S.grp === k) + '"><span class="gi">' + ROLES[k].icon + '</span><span class="gn">' + ROLES[k].name + '</span></button>'; }).join('');
+}
+/* 共用碼登入後：切換組別（同一台裝置隨時可換；已排隊的動作保留原本的組別） */
+V.setGroup = function (g) {
+  if (GROUPS.indexOf(g) < 0) return;
+  S.grp = g; lsSet('vip.grp', g); renderGrpTabs(); showView(g, 'mine'); kick(0);
+};
+function groupPicker(done) {
+  var app = document.getElementById('app'), nm = S.ev ? S.ev.name : evNameKnown();
+  var h = '<div class="login"><div class="login-card"><div class="login-brand">' + (BRAND.logoV ? '<img class="login-logo" src="' + esc(BRAND.logoV) + '" alt="' + esc(BRAND.name + ' ' + BRAND.en) + '">' : '') + '<div class="logo">' + esc(BRAND.appName) + '</div>' + (nm ? '<div class="login-ev" id="pk-ev">' + esc(nm) + '</div>' : '') + '</div>' +
+    '<h3 class="pk-title">請選擇你的組別</h3><p class="muted pk-sub">登入後隨時可以在上方切換組別。每一組只能操作自己負責的步驟，其他組的進度都看得到。</p><div class="pk-grid" id="pk-grid">' +
+    GROUPS.map(function (k) { return '<button class="pk-btn" data-grp="' + k + '"><span class="pk-i">' + ROLES[k].icon + '</span><span class="pk-n">' + ROLES[k].name + '</span><span class="pk-d">' + ROLES[k].desc + '</span></button>'; }).join('') +
+    '</div><button class="btn link" id="pk-out">登出／換存取碼</button></div>' + brandFoot() + '</div>';
+  app.innerHTML = h;
+  document.getElementById('pk-grid').onclick = function (e) { var b = e.target.closest('[data-grp]'); if (!b) return; S.grp = b.dataset.grp; lsSet('vip.grp', S.grp); done(); };
+  document.getElementById('pk-out').onclick = function () { V.confirmLogout(); };
 }
 function updateHeader() {
   var r = document.getElementById('hd-role'); if (!r) return;
   var rr = ROLES[V.viewRole || S.role] || {};
   r.textContent = (rr.icon || '') + ' ' + (rr.name || '');
   var e = document.getElementById('hd-ev');
-  e.textContent = S.ev ? S.ev.name : '';
+  var nm = S.ev ? S.ev.name : '';
+  e.textContent = nm; e.title = nm;
+  renderGrpTabs();
+  var e2 = document.getElementById('hd-ev2'); if (e2) { e2.textContent = nm; e2.style.display = nm ? '' : 'none'; }
+  if (nm) lsSet('vip.evname', nm);
 }
 V.updateHeader = updateHeader;
 function menu() {
@@ -306,6 +369,11 @@ function menu() {
   h += '<button class="btn" id="mn-name">✏️ 修改名字</button>';
   h += '<button class="btn" id="mn-big">🔠 大字模式：' + (document.body.classList.contains('lg') ? '開（點擊關閉）' : '關（點擊開啟）') + '</button>';
   h += '<button class="btn" id="mn-sync">🔄 立即重新同步 ' + (S.pending.length ? '（待送 ' + S.pending.length + '）' : '') + '</button>';
+  if (S.role === 'staff') {
+    h += '<div class="muted small" style="margin-top:8px">切換組別（只能操作所選組別的步驟）：</div><div class="chips">';
+    GROUPS.forEach(function (k) { h += '<button class="chip' + (S.grp === k ? ' on' : '') + '" data-grp="' + k + '">' + ROLES[k].icon + ' ' + ROLES[k].name + '</button>'; });
+    h += '</div>';
+  }
   if (S.role === 'admin') {
     h += '<div class="muted small" style="margin-top:8px">切換到各組畫面（管理員可代為操作）：</div><div class="chips">';
     ['admin', 'transport', 'checkin', 'reception', 'stage', 'director'].forEach(function (k) { h += '<button class="chip' + ((V.viewRole || S.role) === k ? ' on' : '') + '" data-view="' + k + '">' + ROLES[k].icon + ' ' + ROLES[k].name + '</button>'; });
@@ -316,17 +384,29 @@ function menu() {
   m.querySelector('#mn-name').onclick = function () { m.close(); askName(false); };
   m.querySelector('#mn-big').onclick = function () { setBig(!document.body.classList.contains('lg')); m.close(); };
   m.querySelector('#mn-sync').onclick = function () { m.close(); V.forceResync(); toast('重新同步中…'); };
-  m.querySelector('#mn-out').onclick = function () { m.close(); V.logout(); };
+  m.querySelector('#mn-out').onclick = function () { m.close(); V.confirmLogout(); };
+  m.querySelectorAll('[data-grp]').forEach(function (b) { b.onclick = function () { m.close(); V.setGroup(b.dataset.grp); }; });
   m.querySelectorAll('[data-view]').forEach(function (b) { b.onclick = function () { m.close(); showView(b.dataset.view); }; });
 }
-function showView(role) {
+V.panel = 'mine';
+function showView(role, panel) {
   if (curView && curView.unmount) curView.unmount();
   if (curUnsub) curUnsub();
+  var isGrp = GROUPS.indexOf(role) >= 0;
+  if (panel) V.panel = panel;
+  if (!isGrp) V.panel = 'mine';
   V.viewRole = role; updateHeader();
-  var root = document.getElementById('view'); root.innerHTML = ''; root.className = 'v-' + role;
-  curView = views[role];
-  if (!curView) { root.innerHTML = '<p class="pad">此畫面尚未提供</p>'; return; }
-  curView.mount(root);
+  var root = document.getElementById('view'); root.innerHTML = ''; root.className = 'v-' + role + (V.panel === 'all' ? ' v-all' : '');
+  if (isGrp) {
+    var sw = document.createElement('div'); sw.className = 'psw';
+    sw.innerHTML = '<button class="psw-b' + (V.panel === 'mine' ? ' on' : '') + '" data-p="mine">' + ROLES[role].icon + ' ' + ROLES[role].name + '・我的工作</button><button class="psw-b' + (V.panel === 'all' ? ' on' : '') + '" data-p="all">📋 全部貴賓狀態<small>（唯讀）</small></button>';
+    sw.onclick = function (e) { var b = e.target.closest('[data-p]'); if (b && b.dataset.p !== V.panel) showView(role, b.dataset.p); };
+    root.appendChild(sw);
+  }
+  var body = document.createElement('div'); body.id = 'vbody'; root.appendChild(body);
+  curView = isGrp && V.panel === 'all' ? views.all : views[role];
+  if (!curView) { body.innerHTML = '<p class="pad">此畫面尚未提供</p>'; return; }
+  curView.mount(body);
   curUnsub = subscribe(function () { if (curView && curView.update) curView.update(); });
   if (curView.update) curView.update();
   if (location.hash !== '#' + role) history.replaceState(null, '', location.pathname + location.search + '#' + role);
@@ -334,15 +414,16 @@ function showView(role) {
 V.showView = showView;
 
 V.logout = function (msg) {
-  lsDel('vip.code'); S.code = ''; S.role = ''; S.base = {}; S.pending = []; S.ev = null; S.have = false; S.ver = 0; S.epoch = 0; S.mv = 0;
+  lsDel('vip.code'); lsDel('vip.grp'); S.code = ''; S.role = ''; S.grp = ''; S.base = {}; S.pending = []; S.ev = null; S.have = false; S.ver = 0; S.epoch = 0; S.mv = 0;
   clearTimeout(timer); history.replaceState(null, '', location.pathname);
   qs = new URLSearchParams('');
   start(msg);
 };
 
+function evNameKnown() { return BRAND.eventName || lsGet('vip.evname', ''); }
 function loginScreen(msg) {
   var app = document.getElementById('app');
-  var h = '<div class="login"><div class="login-card"><div class="login-brand">' + (BRAND.logoV ? '<img class="login-logo" src="' + esc(BRAND.logoV) + '" alt="' + esc(BRAND.name + ' ' + BRAND.en) + '">' : '') + '<div class="logo">' + esc(BRAND.appName) + '</div></div><p class="muted">請輸入組別存取碼（或點選工作人員傳給你的連結）</p>' +
+  var h = '<div class="login"><div class="login-card"><div class="login-brand">' + (BRAND.logoV ? '<img class="login-logo" src="' + esc(BRAND.logoV) + '" alt="' + esc(BRAND.name + ' ' + BRAND.en) + '">' : '') + '<div class="logo">' + esc(BRAND.appName) + '</div>' + (evNameKnown() ? '<div class="login-ev" id="lg-ev">' + esc(evNameKnown()) + '</div>' : '<div class="login-ev" id="lg-ev" style="display:none"></div>') + '</div><p class="muted">請輸入存取碼（或點選工作人員傳給你的連結）</p>' +
     '<input id="lg-code" class="inp big" autocapitalize="characters" autocomplete="off" placeholder="存取碼" maxlength="40"><div id="lg-err" class="err">' + esc(msg || '') + '</div>' +
     '<button class="btn primary big" id="lg-go">進入</button></div>';
   if (DEMO) h += '<div class="login-card" id="demo-launch"><h3>🧪 示範入口</h3><p class="muted">這是預覽版，內含 400 位虛構貴賓。點下方進入各組畫面，也可以「開新分頁」同時開多個組別，看資料即時流動。</p><div id="demo-links" class="demo-links">載入中…</div><div class="demo-tools" id="demo-tools"></div></div>';
@@ -384,17 +465,25 @@ V.switchEvent = function (id) {
   restore(); updateHeader(); notify(); kick(0);
 };
 
+var launchStaff = null;
 function boot() {
   lsSet('vip.lastrole.' + S.code, S.role);
   S.staff = lsGet(staffKey(), '');
+  S.grp = '';
+  if (S.role === 'staff') {   // 共用碼：網址 #組別 優先（多開分頁用），其次是這台裝置上次選的組別
+    var hg = (location.hash || '').slice(1), lg = lsGet('vip.grp', '');
+    S.grp = GROUPS.indexOf(hg) >= 0 ? hg : GROUPS.indexOf(lg) >= 0 ? lg : '';
+    if (S.grp) lsSet('vip.grp', S.grp);
+  }
   try { var u = new URL(location.href); if (S.role === 'admin') u.searchParams.delete('c'); else u.searchParams.set('c', S.code); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch (e) {}
-  shell();
   var go = function () {
     var want = (location.hash || '').slice(1), role = S.role;
     if (S.role === 'admin' && ROLES[want]) role = want;
+    if (S.role === 'staff') role = S.grp;
     showView(role); kick(0);
   };
-  if (!S.staff) askName(true).then(go); else go();
+  var launch = launchStaff = function () { shell(); renderGrpTabs(); if (!S.staff) askName(true).then(go); else go(); };
+  if (S.role === 'staff' && !S.grp) groupPicker(launch); else launch();
 }
 
 function start(msg) {
