@@ -6,6 +6,10 @@ window.VIP_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbxSw4679KJ9aEt0vUT7kfShy6Ty5cwzB5X-gGfKIL4R2TYaWF8dDF_EUVxTi8DnMWnUcw/exec',
   POLL_MS: 3500,
 
+  /* 座位平面圖（選填、通常不用動）：座位圖請在「後台 → 🗺 座位圖」設定，會跟著活動一起儲存、同步到所有裝置。
+     這裡只是「備用」：萬一後端尚未更新到 1.4.0，可把版面 JSON 貼在這裡讓各裝置先顯示；後端有設定時以後端為準。留 null 即可。 */
+  LAYOUT: null,
+
   /* 品牌設定：換活動／換公司時只改這裡（圖檔放在 img/ 資料夾）。 */
   BRAND: {
     name: '三恆一樹',                    // 公司名稱（頁尾、登入頁）

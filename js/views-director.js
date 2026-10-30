@@ -52,7 +52,17 @@ function catTable(c) {
   keys.forEach(function (k) { var x = rows[k]; h += '<tr><td>' + esc(k) + '</td><td>' + x.exp + '</td><td>' + x.ci + '<div class="mini">' + bar(x.ci, x.exp) + '</div></td><td>' + x.se + '</td><td>' + x.an + '</td><td class="' + (x.exp - x.ci > 0 ? 'late' : '') + '">' + Math.max(0, x.exp - x.ci) + '</td></tr>'; });
   return h + '</table>';
 }
+var dirMode = 'plan', lastTables = '';
 function tableGrid(c) {
+  var FL = V.fp.layout();
+  if (FL) {
+    var plan = dirMode !== 'list', vt = '<div class="fp-vt"><button class="chip' + (plan ? ' on' : '') + '" data-dm="plan">🗺 平面圖</button><button class="chip' + (plan ? '' : ' on') + '" data-dm="list">📋 清單</button></div>';
+    if (plan) return vt + V.fp.plan(FL, V.fp.stats(FL, c.all), {attr: 'data-tbl', sel: selT});
+    return vt + tableList(c);
+  }
+  return tableList(c);
+}
+function tableList(c) {
   var t = {};
   c.all.forEach(function (r) { var k = r.tbl || ''; if (!k) return; var x = t[k] || (t[k] = {n: 0, ci: 0, se: 0}); x.n++; if (r.ci) x.ci++; if (r.se) x.se++; });
   var keys = Object.keys(t).sort(function (a, b) { return U.tblNum(a) - U.tblNum(b) || a.localeCompare(b); });
@@ -84,9 +94,11 @@ function guestRow(r) {
     '<div class="g-meta">' + tg + (+r.ord > 0 ? '<span class="tag">唱名第 ' + r.ord + ' 順位</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
 }
 function tableDetail(c) {
-  var g = c.all.filter(function (r) { return String(r.tbl || '') === selT; }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999) || String(a.name).localeCompare(String(b.name)); });
+  var FL = V.fp.layout(), info = FL ? V.fp.guestsOf(FL, c.all, selT) : null;
+  var g = info ? info.g : c.all.filter(function (r) { return String(r.tbl || '') === selT; }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999) || String(a.name).localeCompare(String(b.name)); });
+  var cap = info && info.x ? '桌位 <b>' + (info.t.cap || '–') + '</b>・' : '', ovw = info && info.x && info.x.over ? '<div class="fp-warn">⚠ 名單 ' + info.x.n + ' 位、已入座 ' + info.x.se + ' 位，超過桌位 ' + info.t.cap + ' 位</div>' : '';
   var ci = g.filter(function (r) { return r.ci; }).length, se = g.filter(function (r) { return r.se; }).length, an = g.filter(function (r) { return r.an; }).length;
-  return '<div class="td-h"><div><h3>🪑 ' + esc(U.tblLabel(selT)) + '</h3><div class="td-sum">共 <b>' + g.length + '</b> 位・已報到 <b>' + ci + '</b>・已入座 <b>' + se + '</b>・已唱名 <b>' + an + '</b></div></div><button class="btn td-x" id="td-close" aria-label="關閉">✕ 關閉</button></div>' +
+  return '<div class="td-h"><div><h3>🪑 ' + esc(info ? info.title : U.tblLabel(selT)) + (info && info.t && info.t.main ? '（主桌）' : '') + '</h3><div class="td-sum">' + cap + '共 <b>' + g.length + '</b> 位・已報到 <b>' + ci + '</b>・已入座 <b>' + se + '</b>・已唱名 <b>' + an + '</b></div>' + ovw + '</div><button class="btn td-x" id="td-close" aria-label="關閉">✕ 關閉</button></div>' +
     '<div class="td-body">' + (g.length ? g.map(guestRow).join('') : '<div class="empty">這桌目前沒有貴賓</div>') + '</div><div class="td-live muted small">即時更新・' + T(Date.now()) + '</div>';
 }
 function renderDetail() {
@@ -161,7 +173,10 @@ V.views.director = {
     $('#aq', r).oninput = function (e) { q = e.target.value; V.views.director.update(); };
     $('#acat', r).onchange = function (e) { nCat = e.target.value; V.views.director.update(); };
     r.insertAdjacentHTML('beforeend', '<div id="tdet-bg" class="tdet-bg" style="display:none"></div><div id="tdet" class="tdet" role="dialog" aria-label="桌次名單" style="display:none"></div>');
+    dirMode = U.lsGet('vip.dirMode', 'plan') === 'list' ? 'list' : 'plan'; lastTables = '';
     r.onclick = function (e) {
+      var dm = e.target.closest ? e.target.closest('[data-dm]') : null;
+      if (dm && r.contains(dm)) { dirMode = dm.getAttribute('data-dm') === 'list' ? 'list' : 'plan'; U.lsSet('vip.dirMode', dirMode); V.views.director.update(); return; }
       var t = e.target.closest ? e.target.closest('[data-tbl]') : null;
       if (t && r.contains(t)) return openTable(t.getAttribute('data-tbl'));
       if (e.target.closest && (e.target.closest('#td-close') || e.target.id === 'tdet-bg')) closeTable();
@@ -189,7 +204,9 @@ V.views.director = {
     $('#nextan', root).innerHTML = nextPanel(c);
     $('#trend', root).innerHTML = trend(c);
     $('#cats', root).innerHTML = catTable(c);
-    $('#tables', root).innerHTML = tableGrid(c);
+    var th = tableGrid(c), tbx = $('#tables', root);
+    if (th !== lastTables || !tbx.firstChild) { tbx.innerHTML = th; lastTables = th; }
+    V.fp.fit(tbx);
     $('#feed', root).innerHTML = feed(c);
     $('#staff', root).innerHTML = staffTable(c);
     var ac = $('#acat', root); if (ac.options.length - 1 !== ((S.ev && S.ev.cats) || []).length) ac.innerHTML = V.catOptions(nCat, true);

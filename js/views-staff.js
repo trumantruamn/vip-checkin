@@ -138,7 +138,7 @@ V.printOrder = function () {
 
 /* ================== 接待組：看著現場桌面，直接按「確認入座」 ================== */
 (function () {
-  var st = {t: null, q: ''};
+  var st = {t: null, q: '', mode: 'plan', sheet: null, planHtml: '', sheetHtml: ''};
   var root;
   function tkey(r) { return String(r.tbl || '').trim() || '__none'; }
   function tname(k) { return k === '__none' ? '尚未排桌' : U.tblLabel(k); }
@@ -163,12 +163,16 @@ V.printOrder = function () {
     keys.sort(function (a, b) { if (a === '__none') return 1; if (b === '__none') return -1; return U.tblNum(a) - U.tblNum(b) || a.localeCompare(b); });
     var ci = all.filter(function (r) { return r.ci; }).length, se = all.filter(function (r) { return r.se; }).length;
     $('#stat', root).innerHTML = '已入座 <b>' + se + '</b> ／ 已報到 <b>' + ci + '</b>' + (ci - se > 0 ? ' ・ <span class="warnc">待入座 ' + (ci - se) + '</span>' : '');
-    var out = '', top = '';
+    var out = '', top = '', FL = V.fp.layout(), plan = !!FL && st.mode !== 'list', planNow = false;
+    $('#fpvt', root).innerHTML = FL ? '<button class="chip' + (plan ? ' on' : '') + '" data-fpm="plan">🗺 平面圖</button><button class="chip' + (plan ? '' : ' on') + '" data-fpm="list">📋 清單</button>' : '';
     if (q) {
       var arr = all.filter(function (r) { return U.matches(r, q); }).sort(sortSeq), c = capList(arr, 60);
       out = c.items.map(function (r) { return gRow(r, true); }).join('') + moreNote(c.more) || '';
       if (!arr.length) out = '<div class="empty">找不到符合的貴賓或桌次</div>';
       out = '<div class="muted small">搜尋結果 ' + arr.length + ' 位（點桌號可看整桌）</div>' + out;
+    } else if (plan) {
+      planNow = true;
+      out = V.fp.plan(FL, V.fp.stats(FL, all), {attr: 'data-ft', sel: st.sheet});
     } else if (st.t != null && tabs[st.t]) {
       var g = tabs[st.t].slice().sort(sortSeq), n = g.length, a = g.filter(function (r) { return r.ci; }).length, s = g.filter(function (r) { return r.se; }).length, wait = g.filter(function (r) { return r.ci && !r.se; }).length;
       top = '<div class="rc-head"><button class="btn" id="rc-back">‹ 所有桌次</button><div class="rc-title"><h3>🪑 ' + esc(tname(st.t)) + '</h3><div class="muted">共 <b>' + n + '</b> 位 ・ 已報到 <b>' + a + '</b> ・ 已入座 <b>' + s + '</b></div></div>' +
@@ -183,16 +187,64 @@ V.printOrder = function () {
     }
     $('#rtop', root).innerHTML = top;
     var l = $('#list', root);
-    if (l.innerHTML !== out) { var y = window.scrollY; l.innerHTML = out; if (y) window.scrollTo(0, y); }
+    if (planNow) {
+      /* 平面圖：用字串比對，沒變就不重畫（避免每 3.5 秒同步時，手指點到一半的按鈕被換掉） */
+      if (st.planHtml !== out || !l.firstChild || !l.querySelector('.fp')) { var y0 = window.scrollY; l.innerHTML = out; st.planHtml = out; V.fp.fit(l); if (y0) window.scrollTo(0, y0); }
+      else V.fp.fit(l);
+    } else {
+      st.planHtml = '';
+      if (l.innerHTML !== out) { var y = window.scrollY; l.innerHTML = out; if (y) window.scrollTo(0, y); }
+    }
+    drawSheet(all, FL);
   }
-  function openT(k) { st.t = k; st.q = ''; $('#tb', root).value = ''; U.lsSet('vip.rcTbl', k); upd(); window.scrollTo(0, 0); }
+  /* 平面圖點開的「這桌名單」：沿用同一套貴賓卡片與按鈕（確認入座／復原），只是放在底部面板 */
+  function drawSheet(all, FL) {
+    var el = $('#fsheet', root), bg = $('#fsbg', root); if (!el) return;
+    if (st.sheet == null || !FL || st.mode === 'list') {
+      if (el.style.display !== 'none') { el.style.display = 'none'; bg.style.display = 'none'; document.body.classList.remove('td-open'); }
+      st.sheetHtml = ''; return;
+    }
+    var info = V.fp.guestsOf(FL, all, st.sheet), x = info.x, g = info.g, h;
+    var wait = g.filter(function (r) { return r.ci && !r.se && V.fp.active(r); });
+    var sum = x ? '桌位 <b>' + (info.t.cap || '–') + '</b> ・ 名單 <b>' + x.n + '</b> ・ 已報到 <b>' + x.ci + '</b> ・ 已入座 <b>' + x.se + '</b>' + (x.wait ? ' ・ <span class="warnc">待入座 ' + x.wait + '</span>' : '') + (x.leave ? ' ・ 請假 ' + x.leave : '')
+      : '共 <b>' + g.length + '</b> 位 ・ 已報到 <b>' + g.filter(function (r) { return r.ci; }).length + '</b> ・ 已入座 <b>' + g.filter(function (r) { return r.se; }).length + '</b>';
+    h = '<div class="td-h"><div><h3>🪑 ' + esc(info.title) + (info.t && info.t.main ? '（主桌）' : '') + '</h3><div class="td-sum">' + sum + '</div>' +
+      (x && x.over ? '<div class="fp-warn">⚠ 名單 ' + x.n + ' 位、已入座 ' + x.se + ' 位，超過桌位 ' + info.t.cap + ' 位，請現場確認</div>' : '') + '</div><button class="btn td-x" id="fs-x">✕ 關閉</button></div>' +
+      '<div class="td-body">' + (wait.length ? '<button class="btn primary fs-all" id="fs-all">已報到的 ' + wait.length + ' 位全部確認入座</button>' : (x && x.n && x.se >= x.n ? '<div class="stc s-se fs-done">✓ 全桌已入座</div>' : '')) +
+      (g.length ? g.map(function (r) { return gRow(r, !!info.multi); }).join('') : '<div class="empty">這桌目前沒有貴賓名單</div>') + '</div>';
+    if (st.sheetHtml !== h || el.style.display === 'none') {
+      var body0 = el.querySelector('.td-body'), sc = body0 ? body0.scrollTop : 0;
+      el.innerHTML = h; st.sheetHtml = h;
+      if (sc) { var b1 = el.querySelector('.td-body'); if (b1) b1.scrollTop = sc; }
+    }
+    if (el.style.display === 'none') { el.style.display = ''; bg.style.display = ''; document.body.classList.add('td-open'); }
+  }
+  function sheetGuests() { var FL = V.fp.layout(); return FL && st.sheet != null ? V.fp.guestsOf(FL, V.list(), st.sheet) : null; }
+  function openT(k) {
+    if (V.fp.layout() && st.mode !== 'list') { st.sheet = k; st.q = ''; $('#tb', root).value = ''; upd(); return; }
+    st.t = k; st.q = ''; $('#tb', root).value = ''; U.lsSet('vip.rcTbl', k); upd(); window.scrollTo(0, 0);
+  }
+  function closeSheet() { st.sheet = null; st.sheetHtml = ''; upd(); }
   V.views.reception = {
     mount: function (r) {
       root = r;
-      var last = U.lsGet('vip.rcTbl', ''); st.t = last || null; st.q = '';
-      r.innerHTML = '<div class="bar"><input id="tb" class="inp search" placeholder="🔍 輸入桌號，或貴賓姓名" inputmode="search" autocomplete="off"></div><div class="subbar"><span id="stat" class="stat-pill"></span></div><div id="rtop"></div><div id="list" class="cards"></div>';
+      var last = U.lsGet('vip.rcTbl', ''); st.t = last || null; st.q = ''; st.sheet = null; st.planHtml = ''; st.sheetHtml = '';
+      st.mode = U.lsGet('vip.rcMode', 'plan') === 'list' ? 'list' : 'plan';
+      r.innerHTML = '<div class="bar"><input id="tb" class="inp search" placeholder="🔍 輸入桌號，或貴賓姓名" inputmode="search" autocomplete="off"></div><div class="subbar"><span id="stat" class="stat-pill"></span><span id="fpvt" class="fp-vt"></span></div><div id="rtop"></div><div id="list" class="cards"></div>' +
+        '<div class="tdet-bg" id="fsbg" style="display:none"></div><div class="tdet fsheet" id="fsheet" style="display:none" role="dialog" aria-label="這桌的貴賓名單"></div>';
+      this.key = function (e) { if (e.key === 'Escape' && st.sheet != null) closeSheet(); };
+      document.addEventListener('keydown', this.key);
       $('#tb', r).oninput = debounce(function (e) { st.q = e.target.value; upd(); }, 100);
       r.onclick = function (e) {
+        var fm = e.target.closest('[data-fpm]'); if (fm) { st.mode = fm.dataset.fpm === 'list' ? 'list' : 'plan'; U.lsSet('vip.rcMode', st.mode); st.sheet = null; upd(); return; }
+        var ft = e.target.closest('[data-ft]'); if (ft) { st.sheet = ft.dataset.ft; upd(); return; }
+        if (e.target.closest('#fs-x') || e.target.closest('#fsbg')) { closeSheet(); return; }
+        if (e.target.closest('#fs-all')) {
+          var si = sheetGuests(); if (!si) return;
+          var g2 = si.g.filter(function (x) { return x.ci && !x.se && V.fp.active(x); });
+          V.confirm('把「' + esc(si.title) + '」已報到的 ' + g2.length + ' 位貴賓，全部標記為已入座？', '確定全部入座', false).then(function (ok) { if (ok) g2.forEach(function (x) { V.stage(x.id, 'se', 1); }); });
+          return;
+        }
         var t = e.target.closest('[data-t]'); if (t) { openT(t.dataset.t); return; }
         var tb = e.target.closest('.tbl-badge[data-tbl]'); if (tb) { openT(tb.dataset.tbl); return; }
         if (e.target.closest('#rc-back')) { st.t = null; U.lsDel('vip.rcTbl'); upd(); return; }
@@ -210,7 +262,7 @@ V.printOrder = function () {
       r.onkeydown = function (e) { var t = e.target.closest && e.target.closest('[data-t]'); if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openT(t.dataset.t); } };
       this.timer = setInterval(upd, 30000);
     },
-    unmount: function () { clearInterval(this.timer); root = null; },
+    unmount: function () { clearInterval(this.timer); if (this.key) document.removeEventListener('keydown', this.key); document.body.classList.remove('td-open'); root = null; },
     update: upd
   };
 })();

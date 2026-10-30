@@ -40,6 +40,7 @@ function seedBase() {
   var a = call({op: 'admin', code: 'admin', cmd: 'event.create', name: '2026屏東縣創新創業協會第29、30屆 理事長交接曁理監事會務幹部就職典禮', date: '2026-10-31', staff: '慶哥'});
   var ev = a.event.id, rows = genRows(20261031);
   for (var i = 0; i < rows.length; i += 200) call({op: 'admin', code: 'admin', ev: ev, cmd: 'guests.import', mode: 'replace', start: i === 0, rows: rows.slice(i, i + 200), staff: '慶哥'});
+  if (window.VIP && window.VIP.fp) call({op: 'admin', code: 'admin', ev: ev, cmd: 'layout.set', layout: window.VIP.fp.preset(), staff: '慶哥'});   // 示範：先套用座位平面圖
   return {ev: ev, codes: a.codes};
 }
 function seedLive(info) {

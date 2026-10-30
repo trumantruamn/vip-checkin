@@ -5,7 +5,7 @@ var V = window.VIP, S = V.S, U = V.u, esc = U.esc, T = U.fmtT;
 function $(s, r) { return (r || document).querySelector(s); }
 function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
 var root, tab = U.lsGet('vip.adminTab', 'over'), ordEd = null;
-var TABS = [['over', '📋 總覽'], ['event', '📅 活動'], ['imp', '📥 匯入名單'], ['ord', '🎤 唱名順序'], ['cats', '🏷 類別'], ['codes', '🔑 存取碼'], ['out', '📤 匯出列印'], ['set', '⚙️ 設定']];
+var TABS = [['over', '📋 總覽'], ['event', '📅 活動'], ['imp', '📥 匯入名單'], ['plan', '🗺 座位圖'], ['ord', '🎤 唱名順序'], ['cats', '🏷 類別'], ['codes', '🔑 存取碼'], ['out', '📤 匯出列印'], ['set', '⚙️ 設定']];
 var ov = {q: '', cat: '', f: 'all', limit: 60};
 function admin(cmd, extra) {
   var b = Object.assign({op: 'admin', code: S.code, ev: S.evId, cmd: cmd, staff: S.staff}, extra || {});
@@ -29,7 +29,7 @@ function render() {
   $('#atabs', root).innerHTML = TABS.map(function (t) { return '<button class="chip' + (tab === t[0] ? ' on' : '') + '" data-atab="' + t[0] + '">' + t[1] + '</button>'; }).join('');
   var p = $('#apane', root); p.innerHTML = ''; if (ordEd) { ordEd.unmount(); ordEd = null; }
   if (!S.evId && tab !== 'event') { p.innerHTML = '<div class="empty">請先到「活動」建立或選擇一個活動</div>'; return; }
-  ({over: paneOver, event: paneEvent, imp: paneImport, ord: paneOrd, cats: paneCats, codes: paneCodes, out: paneOut, set: paneSet})[tab](p);
+  ({over: paneOver, event: paneEvent, imp: paneImport, plan: paneLayout, ord: paneOrd, cats: paneCats, codes: paneCodes, out: paneOut, set: paneSet})[tab](p);
 }
 
 /* ---------- 總覽 ---------- */
@@ -250,6 +250,184 @@ function paneCats(p) {
     };
   }
   draw();
+}
+
+/* ---------- 座位圖設定（v1.4） ---------- */
+var FP_TYPES = [['table', '桌'], ['stage', '舞台'], ['aisle', '走道'], ['door', '出入口'], ['label', '文字']];
+var FP_HDR = {t: ['類型', '種類', '項目'], id: ['桌號', '編號', 'id'], name: ['名稱', '桌名', '顯示名稱'], cap: ['人數', '桌位', '桌位數', '容量'], x: ['欄', 'x', '橫'], y: ['列', 'y', '縱', '行'], w: ['跨欄', '寬', '寬度'], h: ['跨列', '高', '高度'], alias: ['別名', '別稱', '對應桌次']};
+function fpClone(o) { return o ? JSON.parse(JSON.stringify(o)) : null; }
+function fpCheck(d) {
+  var errs = [], tabs = [], seen = {};
+  if (!d || !d.items || !d.items.length) return errs;
+  d.items.forEach(function (it, i) {
+    var n = '第 ' + (i + 1) + ' 列';
+    if (!(+it.x >= 1) || !(+it.y >= 1)) errs.push(n + '：欄、列要填 1 以上的數字');
+    if (it.t === 'table') {
+      if (!String(it.id || '').trim()) { errs.push(n + '：桌號不能空白'); return; }
+      var ks = [V.fp.key(it.id), V.fp.key(it.name || it.id)].concat((it.alias || []).map(V.fp.key));
+      ks.forEach(function (k) { if (k && seen[k] && seen[k] !== it) errs.push('桌號重複：「' + it.id + '」與「' + (seen[k].name || seen[k].id) + '」重複（'+ n + '）'); else if (k) seen[k] = it; });
+      tabs.push(it);
+    }
+  });
+  var cells = {};
+  d.items.forEach(function (it, i) {
+    for (var a = 0; a < (+it.w || 1); a++) for (var b = 0; b < (+it.h || 1); b++) {
+      var k = (+it.x + a) + ',' + (+it.y + b), o = cells[k];
+      if (o && (o.t === 'table' || it.t === 'table') && o !== it) errs.push('位置重疊：「' + (o.name || o.label || o.t) + '」與「' + (it.name || it.label || it.t) + '」都在 欄' + (+it.x + a) + '、列' + (+it.y + b));
+      if (!o || it.t === 'table') cells[k] = it;
+    }
+  });
+  var uniq = {}; return errs.filter(function (e) { if (uniq[e]) return false; uniq[e] = 1; return true; }).slice(0, 8);
+}
+/* Excel「座位圖」工作表 → 版面 */
+function fpFromRows(rows) {
+  var hi = -1, map = {};
+  for (var i = 0; i < Math.min(rows.length, 10) && hi < 0; i++) {
+    var m = {}, hit = 0;
+    rows[i].forEach(function (h, c) { var k = cleanH(h); Object.keys(FP_HDR).forEach(function (f) { if (m[f] == null && FP_HDR[f].some(function (a) { return cleanH(a) === k; })) { m[f] = c; hit++; } }); });
+    if (m.x != null && m.y != null && hit >= 4) { hi = i; map = m; }
+  }
+  if (hi < 0) return {err: '找不到欄位標題。第一列需有：類型、桌號、名稱、人數、欄、列（跨欄、跨列、別名可省略）'};
+  var items = [], errs = [];
+  function g(r, f) { return map[f] == null ? '' : String(r[map[f]] == null ? '' : r[map[f]]).trim(); }
+  rows.slice(hi + 1).forEach(function (r, ri) {
+    if (!r.some(function (c) { return String(c).trim(); })) return;
+    var tx = g(r, 't'), n = '第 ' + (hi + ri + 2) + ' 列', t = /主桌|^桌|桌$/.test(tx) && !/走道/.test(tx) ? 'table' : /舞台/.test(tx) ? 'stage' : /走道/.test(tx) ? 'aisle' : /出入口|出入|門|入口/.test(tx) ? 'door' : /文字|標示|說明/.test(tx) ? 'label' : '';
+    if (!t) { errs.push(n + '：看不懂「類型」（' + tx + '），請填 桌／主桌／舞台／走道／出入口／文字'); return; }
+    var x = parseInt(g(r, 'x'), 10), y = parseInt(g(r, 'y'), 10);
+    if (!(x >= 1) || !(y >= 1)) { errs.push(n + '：欄、列必填（1 以上的數字）'); return; }
+    var it = {t: t, x: x, y: y, w: Math.max(1, parseInt(g(r, 'w'), 10) || 1), h: Math.max(1, parseInt(g(r, 'h'), 10) || 1)};
+    if (t === 'table') {
+      var id = g(r, 'id'), nm = g(r, 'name'); if (!id && nm) { var mm = /(\d+)/.exec(nm); id = mm ? mm[1] : nm; }
+      if (!id) { errs.push(n + '：桌號必填'); return; }
+      id = String(id).replace(/^第\s*/, '').replace(/\s*桌$/, '') || id;
+      it.id = id; it.name = nm || '第' + id + '桌'; it.cap = Math.max(0, parseInt(g(r, 'cap'), 10) || 0);
+      if (/主桌/.test(tx)) { it.main = 1; }
+      var al = g(r, 'alias').split(/[,，、;；\s]+/).filter(Boolean); if (it.main && al.indexOf('主桌') < 0) al.push('主桌'); if (al.length) it.alias = al;
+    } else it.label = g(r, 'name') || g(r, 'id');
+    items.push(it);
+  });
+  return {layout: {v: 1, items: items}, errs: errs};
+}
+function fpToRows(d) {
+  var NM = {table: '桌', stage: '舞台', aisle: '走道', door: '出入口', label: '文字'}, rows = [['類型', '桌號', '名稱', '人數', '欄', '列', '跨欄', '跨列', '別名']];
+  (d.items || []).forEach(function (it) {
+    rows.push([it.t === 'table' && it.main ? '主桌' : NM[it.t], it.t === 'table' ? it.id : '', it.t === 'table' ? it.name : (it.label || ''), it.t === 'table' ? it.cap : '', it.x, it.y, it.w, it.h, (it.alias || []).filter(function (a) { return a !== '主桌'; }).join('、')]);
+  });
+  return rows;
+}
+function paneLayout(p) {
+  var saved = fpClone(S.ev && S.ev.layout), draft = fpClone(saved), msg = '', ver = '';
+  function dirty() { return JSON.stringify(draft) !== JSON.stringify(saved); }
+  function nTables(d) { return d && d.items ? d.items.filter(function (i) { return i.t === 'table'; }).length : 0; }
+  function sorted() { return (draft ? draft.items : []).map(function (it, i) { return {it: it, i: i}; }); }
+  function draw() {
+    var cur = nTables(saved), h = '<div class="pnl"><h3>🗺 座位圖設定</h3>' +
+      '<p class="muted small">設定後，接待組與總召會看到「桌位平面圖」（點桌子看名單、確認入座）。沒有設定時，維持原本的桌次清單。每一場活動各自設定。</p>' +
+      (ver && !/1\.[4-9]|[2-9]\.\d/.test(ver) ? '<div class="warn-box">⚠ 後端 Code.gs 還是舊版（' + esc(ver) + '），請先依「設定說明」更新 Code.gs 並重新部署，座位圖才能儲存、同步到各台裝置。</div>' : '') +
+      '<div class="muted">目前狀態：' + (cur ? '<b>已設定</b>（' + cur + ' 桌，桌位合計 ' + capSum(saved) + '）' : '<b>尚未設定</b>（使用桌次清單）') + (dirty() ? ' ・ <span class="warnc">有尚未儲存的修改</span>' : '') + '</div>' +
+      '<div class="fp-btns"><button class="btn primary" id="fp-preset">⚡ 載入本場預設（主桌 15 人、其他桌 10 人）</button>' +
+      '<label class="btn" for="fp-file">📥 匯入 Excel（工作表「座位圖」）</label><input type="file" id="fp-file" accept=".xlsx,.xls,.csv" style="display:none">' +
+      '<button class="btn" id="fp-dl">📄 下載 Excel 範本／匯出目前</button><button class="btn danger" id="fp-clear">🗑 清除（改回桌次清單）</button></div>' +
+      (msg ? '<div class="' + (/^⚠/.test(msg) ? 'warn-box' : 'ok-box') + '" id="fp-msg">' + msg + '</div>' : '') + '</div>';
+    h += '<div class="pnl"><h3>預覽</h3><div class="row fp-cap"><label>一般桌位數 <input class="inp sm tin" id="fp-capall" type="number" min="0" value="10"></label><label>主桌 <input class="inp sm tin" id="fp-capmain" type="number" min="0" value="15"></label><button class="btn sm" id="fp-capgo">套用到所有桌</button></div><div id="fp-prev"></div><div id="fp-chk"></div></div>';
+    h += '<div class="pnl"><h3>項目表 <span class="muted small">（欄＝由左數第幾格、列＝由上數第幾格；跨欄、跨列＝佔幾格）</span></h3><div class="twrap"><table class="tbl" id="fp-tbl"><tr><th>類型</th><th>桌號／文字</th><th>名稱</th><th>人數</th><th>欄</th><th>列</th><th>跨欄</th><th>跨列</th><th>主桌</th><th>別名</th><th></th></tr>';
+    sorted().forEach(function (o) {
+      var it = o.it, i = o.i, tb = it.t === 'table';
+      function inp(f, v, cls, type) { return '<input class="inp sm ' + (cls || '') + '" data-i="' + i + '" data-f="' + f + '" value="' + esc(v == null ? '' : v) + '"' + (type ? ' type="number" min="1"' : '') + '>'; }
+      h += '<tr><td><select class="inp sm" data-i="' + i + '" data-f="t">' + FP_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (it.t === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></td>' +
+        '<td>' + (tb ? inp('id', it.id, 'tin') : inp('label', it.label, '')) + '</td><td>' + (tb ? inp('name', it.name, '') : '') + '</td><td>' + (tb ? inp('cap', it.cap, 'tin', 1) : '') + '</td>' +
+        '<td>' + inp('x', it.x, 'tin', 1) + '</td><td>' + inp('y', it.y, 'tin', 1) + '</td><td>' + inp('w', it.w, 'tin', 1) + '</td><td>' + inp('h', it.h, 'tin', 1) + '</td>' +
+        '<td>' + (tb ? '<input type="checkbox" data-i="' + i + '" data-f="main"' + (it.main ? ' checked' : '') + '>' : '') + '</td><td>' + (tb ? inp('alias', (it.alias || []).join('、'), '') : '') + '</td><td><button class="btn sm danger" data-del="' + i + '" aria-label="刪除這一列">✕</button></td></tr>';
+    });
+    h += '</table></div><div class="row"><button class="btn sm" id="fp-add">＋ 新增一桌</button><button class="btn sm" id="fp-add2">＋ 新增舞台／走道／出入口／文字</button></div></div>';
+    h += '<div class="pnl"><button class="btn primary xl" id="fp-save"' + (dirty() && draft ? '' : ' disabled') + '>💾 儲存座位圖</button><div class="muted small">儲存後，所有工作人員的裝置會在幾秒內自動更新畫面。</div></div>';
+    p.innerHTML = h; bind(); preview();
+  }
+  function capSum(d) { var c = 0; (d.items || []).forEach(function (i) { if (i.t === 'table') c += +i.cap || 0; }); return c; }
+  function preview() {
+    var box = $('#fp-prev', p), chk = $('#fp-chk', p); if (!box) return;
+    var L = draft ? V.fp.normalize(draft) : null;
+    if (!L) { box.innerHTML = '<div class="empty">還沒有座位圖。按上方「載入本場預設」，或匯入 Excel。</div>'; chk.innerHTML = ''; return; }
+    var st = V.fp.stats(L, V.list());
+    box.innerHTML = V.fp.plan(L, st, {attr: 'data-px'}); V.fp.fit(box);
+    var errs = fpCheck(draft), h = '';
+    if (errs.length) h += '<div class="warn-box">⚠ 請先修正：<ul>' + errs.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+    var oth = Object.keys(st.other); if (oth.length) h += '<div class="warn-box">名單中有 ' + st.otherCount + ' 位貴賓的桌次不在這張圖上：' + esc(oth.slice(0, 12).join('、')) + (oth.length > 12 ? '…' : '') + '。可在「別名」欄把它們對應到某一桌。</div>';
+    chk.innerHTML = h;
+    var sv = $('#fp-save', p); if (sv) sv.disabled = !(dirty() && draft) || errs.length > 0;
+  }
+  var pv = debounce(preview, 150);
+  function bind() {
+    $('#fp-tbl', p).oninput = $('#fp-tbl', p).onchange = function (e) {
+      var el = e.target, i = el.dataset.i; if (i == null) return; var it = draft.items[+i], f = el.dataset.f;
+      if (f === 't') { it.t = el.value; if (it.t === 'table') { it.id = it.id || ''; it.name = it.name || ''; it.cap = it.cap || 10; } if (e.type === 'change') draw(); else return; return; }
+      if (f === 'main') it.main = el.checked ? 1 : 0;
+      else if (f === 'alias') it.alias = el.value.split(/[,，、;；\s]+/).filter(Boolean);
+      else if (/^(x|y|w|h|cap)$/.test(f)) it[f] = parseInt(el.value, 10) || 0;
+      else it[f] = el.value;
+      pv();
+    };
+    p.querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { draft.items.splice(+b.dataset.del, 1); if (!draft.items.length) draft = null; msg = ''; draw(); }; });
+    $('#fp-add', p).onclick = function () {
+      draft = draft || {v: 1, items: []};
+      var my = 1, nid = 1; draft.items.forEach(function (it) { my = Math.max(my, it.y + it.h - 1); if (it.t === 'table' && /^\d+$/.test(it.id)) nid = Math.max(nid, +it.id + 1); });
+      draft.items.push({t: 'table', id: String(nid), name: '第' + nid + '桌', cap: 10, x: 1, y: my + 1, w: 1, h: 1}); msg = ''; draw();
+    };
+    $('#fp-add2', p).onclick = function () { draft = draft || {v: 1, items: []}; draft.items.push({t: 'aisle', label: '走　道', x: 1, y: 1, w: 1, h: 1}); msg = ''; draw(); };
+    $('#fp-capgo', p).onclick = function () {
+      if (!draft) { V.toast('還沒有座位圖', 'bad'); return; }
+      var a = parseInt($('#fp-capall', p).value, 10), m = parseInt($('#fp-capmain', p).value, 10);
+      if (!(a >= 0) || !(m >= 0)) { V.toast('請填人數', 'bad'); return; }
+      draft.items.forEach(function (it) { if (it.t === 'table') it.cap = it.main ? m : a; }); msg = ''; draw();
+    };
+    $('#fp-preset', p).onclick = function () {
+      var a = parseInt($('#fp-capall', p).value, 10), m = parseInt($('#fp-capmain', p).value, 10);
+      V.confirm('載入並<b>儲存</b>本場預設座位圖（主桌第 1 桌 ' + (m >= 0 ? m : 15) + ' 人、其他桌 ' + (a >= 0 ? a : 10) + ' 人，共 45 桌）？' + (saved ? '<br>目前已設定的座位圖會被取代。' : ''), '載入並儲存', false).then(function (ok) {
+        if (ok) save(V.fp.preset({mainCap: m >= 0 ? m : 15, cap: a >= 0 ? a : 10}), '已載入並儲存本場預設座位圖');
+      });
+    };
+    $('#fp-clear', p).onclick = function () {
+      if (!saved && !draft) { V.toast('目前沒有座位圖'); return; }
+      V.confirm('清除座位圖？接待組與總召會改回桌次清單。（貴賓名單與入座紀錄不受影響）', '清除', true).then(function (ok) { if (ok) save(null, '已清除座位圖'); });
+    };
+    $('#fp-dl', p).onclick = function () {
+      loadXlsx().then(function () {
+        var d = draft && draft.items.length ? draft : V.fp.preset(), wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fpToRows(d)), '座位圖');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['說明'], ['每一列是一個項目。類型：桌、主桌、舞台、走道、出入口、文字。'], ['欄＝由左數第幾格（1 開始）、列＝由上數第幾格；跨欄、跨列＝佔幾格（主桌常跨 3 欄）。'], ['桌號要和貴賓名單「桌次」對得起來（1、1桌、第1桌 都視為同一桌）。別名可填其他叫法，例如 主桌。'], ['改好後，到後台「座位圖」按「匯入 Excel」，確認預覽沒問題再按儲存。']]), '說明');
+        XLSX.writeFile(wb, '座位圖.xlsx');
+      }).catch(err);
+    };
+    $('#fp-file', p).onchange = function (e) {
+      var f = e.target.files[0]; if (!f) return;
+      Promise.all([loadXlsx(), new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.readAsArrayBuffer(f); })]).then(function (a) {
+        var wb = /\.(csv|txt)$/i.test(f.name) ? XLSX.read(decodeCsv(a[1]), {type: 'string'}) : XLSX.read(a[1], {type: 'array'});
+        var sn = wb.SheetNames.filter(function (n) { return /座位圖/.test(n); })[0] || wb.SheetNames.filter(function (n) { return /座位|桌/.test(n); })[0] || wb.SheetNames[0];
+        var r = fpFromRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], {header: 1, defval: '', raw: false}));
+        if (r.err) { msg = '⚠ ' + esc(r.err); draw(); return; }
+        if (!r.layout.items.length) { msg = '⚠ 工作表「' + esc(sn) + '」裡沒有可用的項目'; draw(); return; }
+        draft = r.layout; msg = (r.errs.length ? '⚠ 匯入了 ' + r.layout.items.length + ' 個項目，但有 ' + r.errs.length + ' 列略過：<br>' + r.errs.slice(0, 5).map(esc).join('<br>') + '<br>' : '') + (r.errs.length ? '' : '已讀入工作表「' + esc(sn) + '」的 ' + r.layout.items.length + ' 個項目，') + '請確認預覽後按「儲存座位圖」。'; draw();
+      }).catch(function (er) { msg = '⚠ ' + esc(er.message || er); draw(); });
+    };
+    $('#fp-save', p).onclick = function () {
+      var errs = fpCheck(draft); if (errs.length) { V.toast(errs[0], 'bad'); return; }
+      save(draft, '已儲存座位圖，各裝置會在幾秒內自動更新');
+    };
+  }
+  function save(layout, okMsg) {
+    admin('layout.set', {layout: layout}).then(function (r) {
+      var lay = r.layout || null;
+      if (S.ev) S.ev.layout = lay;
+      (S.events || []).forEach(function (e) { if (e.id === S.evId) e.layout = lay; });
+      saved = fpClone(lay); draft = fpClone(lay); msg = ''; V.toast(okMsg); V.notify(); draw();
+    }).catch(function (e) {
+      var m = String(e && e.message || e);
+      err(/未知指令/.test(m) ? new Error('後端 Code.gs 還是舊版，請先更新並重新部署（見設定說明）') : e);
+    });
+  }
+  draw();
+  admin('events').then(function (r) { ver = String(r.version || ''); if ($('#fp-save', p) && !dirty()) draw(); }).catch(function () {});
 }
 
 /* ---------- 存取碼 ---------- */
