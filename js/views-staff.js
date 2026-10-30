@@ -1,4 +1,4 @@
-/* 交通組／報到組／接待組／舞台組 畫面 */
+/* 報到組／接待組／舞台組 畫面（與總召同一個介面） */
 (function () {
 'use strict';
 var V = window.VIP, S = V.S, U = V.u, esc = U.esc, T = U.fmtT;
@@ -28,58 +28,6 @@ function capList(arr, cap, q) {
 }
 function moreNote(n) { return n ? '<div class="more-note">還有 ' + n + ' 位未顯示，請輸入更多關鍵字縮小範圍</div>' : ''; }
 
-/* ================== 交通組 ================== */
-(function () {
-  var st = {tab: 'todo', drv: U.lsGet('vip.trDrv', ''), q: ''};
-  var root;
-  V.views.transport = {
-    mount: function (r) {
-      root = r;
-      r.innerHTML = '<div class="bar"><input id="q" class="inp search" placeholder="🔍 搜尋姓名／單位／車號" autocomplete="off"></div>' +
-        '<div class="chips scroll" id="drv"></div><div class="tabs" id="tabs"></div><div id="list" class="cards"></div>';
-      $('#q', r).oninput = debounce(function (e) { st.q = e.target.value; V.views.transport.update(); }, 120);
-      r.onclick = function (e) {
-        var b = e.target.closest('[data-a],[data-tab],[data-drv]');
-        if (!b) return;
-        if (b.dataset.tab) { st.tab = b.dataset.tab; this_update(); return; }
-        if (b.dataset.drv !== undefined) { st.drv = b.dataset.drv; U.lsSet('vip.trDrv', st.drv); this_update(); return; }
-        var id = b.closest('[data-id]').dataset.id, a = b.dataset.a;
-        if (a === 'pk') V.stage(id, 'pk', 1);
-        else if (a === 'dl') V.stage(id, 'dl', 1);
-        else if (a === 'unpk') V.stage(id, 'pk', 0);
-        else if (a === 'undl') V.stage(id, 'dl', 0);
-      };
-    },
-    update: this_update
-  };
-  function this_update() {
-    if (!root) return;
-    var all = V.list().filter(U.isTr);
-    var drvs = {};
-    all.forEach(function (r) { var k = r.tr || r.veh || '(未指定)'; drvs[k] = (drvs[k] || 0) + (r.pk ? 0 : 1); });
-    var h = chip('全部 (' + all.length + ')', !st.drv, 'data-drv=""');
-    Object.keys(drvs).sort().forEach(function (k) { h += chip(esc(k) + (drvs[k] ? ' · 待接 ' + drvs[k] : ''), st.drv === k, 'data-drv="' + esc(k) + '"'); });
-    $('#drv', root).innerHTML = h;
-    var mine = all.filter(function (r) { return (!st.drv || (r.tr || r.veh || '(未指定)') === st.drv) && U.matches(r, st.q); });
-    var todo = mine.filter(function (r) { return !r.pk; }), on = mine.filter(function (r) { return r.pk && !r.dl; }), done = mine.filter(function (r) { return r.dl; });
-    $('#tabs', root).innerHTML = chip('待接送 <b>' + todo.length + '</b>', st.tab === 'todo', 'data-tab="todo"') + chip('已接到・在途 <b>' + on.length + '</b>', st.tab === 'onway', 'data-tab="onway"') + chip('已送達 <b>' + done.length + '</b>', st.tab === 'done', 'data-tab="done"');
-    var arr = st.tab === 'todo' ? todo.sort(function (a, b) { return (a.pl || '').localeCompare(b.pl || '') || (a.seq || 0) - (b.seq || 0); }) :
-      st.tab === 'onway' ? on.sort(function (a, b) { return a.pk - b.pk; }) : done.sort(function (a, b) { return b.dl - a.dl; });
-    var c = capList(arr, 120), out = '';
-    c.items.forEach(function (r) {
-      out += '<div class="card g" data-id="' + r.id + '"><div class="g-main"><div class="g-name">' + esc(r.name) + '</div><div class="g-sub">' + esc(U.addrName(r)) + '</div>' +
-        '<div class="g-meta">' + (r.tr ? '🚐 ' + esc(r.tr) + ' ' : '') + (r.veh ? '<b>' + esc(r.veh) + '</b> ' : '') + (r.pl ? '📍 ' + esc(r.pl) : '') + '</div>' +
-        (r.ci ? '<div class="g-meta ok">✅ 已報到 ' + T(r.ci) + '</div>' : '') +
-        (r.pk ? '<div class="g-meta">接到 ' + T(r.pk) + '（' + esc(r.pkBy || '') + '）' + (r.dl ? '・送達 ' + T(r.dl) + '（' + esc(r.dlBy || '') + '）' : '') + '</div>' : '') + '</div><div class="g-act">';
-      if (!r.pk) out += '<button class="btn primary xl" data-a="pk">已接到</button>';
-      else if (!r.dl) out += '<button class="btn ok xl" data-a="dl">已送達門口</button><button class="btn link" data-a="unpk">復原「已接到」</button>';
-      else out += '<div class="done-mark">✓ ' + T(r.dl) + '</div><button class="btn link" data-a="undl">復原「已送達」</button>';
-      out += '</div></div>';
-    });
-    $('#list', root).innerHTML = (out || '<div class="empty">' + (all.length ? '這個分頁沒有貴賓' : '目前沒有分配給交通組的貴賓') + '</div>') + moreNote(c.more);
-  }
-})();
-
 /* ================== 報到組 ================== */
 (function () {
   var st = {status: 'todo', grp: U.lsGet('vip.ciGrp', ''), cat: '', q: ''};
@@ -104,24 +52,16 @@ function moreNote(n) { return n ? '<div class="more-note">還有 ' + n + ' 位�
     });
     var out = '';
     function row(r) {
-      var h = '<div class="card g' + (r.ci ? ' arrived' : '') + (r.dl && !r.ci ? ' hot' : '') + '" data-id="' + r.id + '">' + seqBadge(r) + '<div class="g-main"><div class="g-name">' + esc(r.name) + '</div><div class="g-sub">' + esc(U.addrName(r)) + '</div><div class="g-meta">' + tags(r) +
-        (r.dl && !r.ci ? '<span class="tag hot">🚐 已到門口 ' + T(r.dl) + '</span>' : r.pk && !r.ci ? '<span class="tag hot2">🚐 接送中・即將抵達</span>' : (U.isTr(r) && !r.pk && !r.ci ? '<span class="tag">有專車接送</span>' : '')) + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div></div><div class="g-act">';
+      var h = '<div class="card g' + (r.ci ? ' arrived' : '') + '" data-id="' + r.id + '">' + seqBadge(r) + '<div class="g-main"><div class="g-name">' + esc(r.name) + '</div><div class="g-sub">' + esc(U.addrName(r)) + '</div><div class="g-meta">' + tags(r) +
+        (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div></div><div class="g-act">';
       if (r.ci) h += '<div class="tbl-badge sm">' + esc(U.tblLabel(r.tbl) || '未排桌') + '</div><div class="muted small">' + T(r.ci) + ' 已報到</div><button class="btn" data-a="show">查看</button>';
       else h += '<button class="btn ok xl" data-a="ci">報到</button>';
       return h + '</div></div>';
     }
-    if (!q && st.status === 'todo') {
-      var d = arr.filter(function (r) { return r.dl; }).sort(function (a, b) { return b.dl - a.dl; }), p = arr.filter(function (r) { return r.pk && !r.dl; }).sort(function (a, b) { return b.pk - a.pk; });
-      var rest = arr.filter(function (r) { return !r.dl && !r.pk; }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); });
-      if (d.length) out += '<div class="sec hot">🚐 已到門口（交通組已送達） · ' + d.length + '</div>' + d.map(row).join('');
-      if (p.length) out += '<div class="sec hot2">🚐 接送中・即將抵達 · ' + p.length + '</div>' + p.map(row).join('');
-      var c = capList(rest, 60);
-      out += '<div class="sec">其他待報到 · ' + rest.length + '（輸入姓名／單位快速搜尋）</div>' + c.items.map(row).join('') + moreNote(c.more);
-    } else {
-      arr.sort(function (a, b) { return (a.ci ? 1 : 0) - (b.ci ? 1 : 0) || (a.seq || 99999) - (b.seq || 99999); });
-      var c2 = capList(arr, 80);
-      out = c2.items.map(row).join('') + moreNote(c2.more);
-    }
+    arr.sort(function (a, b) { return (a.ci ? 1 : 0) - (b.ci ? 1 : 0) || (a.seq || 99999) - (b.seq || 99999); });
+    var c2 = capList(arr, !q && st.status === 'todo' ? 60 : 80);
+    if (!q && st.status === 'todo') out += '<div class="sec">待報到 · ' + arr.length + '（輸入姓名／單位快速搜尋）</div>';
+    out += c2.items.map(row).join('') + moreNote(c2.more);
     $('#list', root).innerHTML = out || '<div class="empty">找不到符合的貴賓。可點右上「＋現場新增」。</div>';
   }
   function resultOverlay(id) {
@@ -180,146 +120,244 @@ function moreNote(n) { return n ? '<div class="more-note">還有 ' + n + ' 位�
     update: function () { var c = $('#cat', root); if (c && c.options.length - 1 !== ((S.ev && S.ev.cats) || []).length) { c.innerHTML = catOptions(st.cat, true); } upd(); }
   };
 })();
+/* ================== 共用：狀態標籤、唱名順序列印 ================== */
+function statusChip(r) {
+  if (r.an) return '<span class="stc s-an">🎤 已唱名 ' + U.fmtTS(r.an) + '</span>';
+  if (r.se) return '<span class="stc s-se">🪑 已入座 ' + T(r.se) + '</span>';
+  if (r.ci) return '<span class="stc s-ci">✅ 已報到・未入座</span>';
+  return '<span class="stc s-none">⚪ 尚未報到</span>';
+}
+V.statusChip = statusChip;
+V.printOrder = function () {
+  var o = V.orderedList().ordered;
+  if (!o.length) { V.toast('還沒有設定唱名順序', 'bad'); return; }
+  var h = '<div id="print-area"><h2>' + esc(S.ev ? S.ev.name : '') + ' 主持人唱名順序</h2><table><tr><th>順序</th><th>類別</th><th>單位</th><th>職稱</th><th>姓名</th><th>桌次</th><th>唱名</th></tr>';
+  o.forEach(function (r) { h += '<tr><td>' + r.ord + '</td><td>' + esc(r.cat) + '</td><td>' + esc(r.org) + '</td><td>' + esc(r.title) + '</td><td><b>' + esc(r.name) + '</b></td><td>' + esc(U.tblLabel(r.tbl)) + '</td><td>☐</td></tr>'; });
+  V.printHtml(h + '</table></div>');
+};
 
-/* ================== 接待組 ================== */
+/* ================== 接待組：看著現場桌面，直接按「已入座」 ================== */
 (function () {
-  var st = {tab: 'wait', f: 'all', tbl: ''};
+  var st = {t: null, q: ''};
   var root;
+  function tkey(r) { return String(r.tbl || '').trim() || '__none'; }
+  function tname(k) { return k === '__none' ? '尚未排桌' : U.tblLabel(k); }
+  function gRow(r, showTbl) {
+    var w = r.ci && !r.se ? U.waitMin(r.ci) : 0;
+    var h = '<div class="card g rc2' + (r.se ? ' seated' : r.ci ? ' arrived' : ' notyet') + '" data-id="' + r.id + '">' + (showTbl ? '<div class="tbl-badge" data-tbl="' + esc(tkey(r)) + '">' + esc(tname(tkey(r))) + '</div>' : '') +
+      '<div class="g-main"><div class="g-name">' + esc(r.name) + '</div><div class="g-sub">' + esc(U.addrName(r)) + '</div><div class="g-meta">' + tags(r) +
+      (r.se ? '<span class="stc s-se">🪑 已入座 ' + T(r.se) + (r.seBy ? '（' + esc(r.seBy) + '）' : '') + '</span>' :
+        r.ci ? '<span class="stc s-ci">✅ 已報到 ' + T(r.ci) + (w >= 5 ? ' ・ <b class="late">已等 ' + w + ' 分</b>' : '') + '</span>' : '<span class="stc s-none">⚪ 尚未報到</span>') +
+      (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div></div><div class="g-act">';
+    if (r.se) h += '<button class="btn link" data-a="unse">復原入座</button>';
+    else if (r.ci) h += '<button class="btn ok xl" data-a="se">已入座</button>';
+    else h += '<button class="btn xl" data-a="senc">已入座<small>（尚未報到）</small></button>';
+    return h + '</div></div>';
+  }
+  function sortSeq(a, b) { return (a.seq || 99999) - (b.seq || 99999) || String(a.name).localeCompare(String(b.name)); }
+  function upd() {
+    if (!root) return;
+    var all = V.list(), q = st.q.trim(), tabs = {}, keys = [];
+    all.forEach(function (r) { var k = tkey(r); if (!tabs[k]) { tabs[k] = []; keys.push(k); } tabs[k].push(r); });
+    keys.sort(function (a, b) { if (a === '__none') return 1; if (b === '__none') return -1; return U.tblNum(a) - U.tblNum(b) || a.localeCompare(b); });
+    var ci = all.filter(function (r) { return r.ci; }).length, se = all.filter(function (r) { return r.se; }).length;
+    $('#stat', root).innerHTML = '已入座 <b>' + se + '</b> ／ 已報到 <b>' + ci + '</b>' + (ci - se > 0 ? ' ・ <span class="warnc">待入座 ' + (ci - se) + '</span>' : '');
+    var out = '', top = '';
+    if (q) {
+      var arr = all.filter(function (r) { return U.matches(r, q); }).sort(sortSeq), c = capList(arr, 60);
+      out = c.items.map(function (r) { return gRow(r, true); }).join('') + moreNote(c.more) || '';
+      if (!arr.length) out = '<div class="empty">找不到符合的貴賓或桌次</div>';
+      out = '<div class="muted small">搜尋結果 ' + arr.length + ' 位（點桌號可看整桌）</div>' + out;
+    } else if (st.t != null && tabs[st.t]) {
+      var g = tabs[st.t].slice().sort(sortSeq), n = g.length, a = g.filter(function (r) { return r.ci; }).length, s = g.filter(function (r) { return r.se; }).length, wait = g.filter(function (r) { return r.ci && !r.se; }).length;
+      top = '<div class="rc-head"><button class="btn" id="rc-back">‹ 所有桌次</button><div class="rc-title"><h3>🪑 ' + esc(tname(st.t)) + '</h3><div class="muted">共 <b>' + n + '</b> 位 ・ 已報到 <b>' + a + '</b> ・ 已入座 <b>' + s + '</b></div></div>' +
+        (wait ? '<button class="btn primary" id="rc-all">已報到的 ' + wait + ' 位全部入座</button>' : '<span class="stc s-se">' + (s === n && n ? '✓ 全桌已入座' : '') + '</span>') + '</div>';
+      out = g.map(function (r) { return gRow(r, false); }).join('');
+    } else {
+      if (st.t != null) st.t = null;
+      out = '<div class="rc-tip">👇 點選桌號，看這桌的貴賓名單，坐定後直接按「已入座」。</div><div class="tgrid rc-tiles">' + keys.map(function (k) {
+        var g = tabs[k], n = g.length, a = g.filter(function (r) { return r.ci; }).length, s = g.filter(function (r) { return r.se; }).length, wait = a - s;
+        return '<div class="tt' + (s >= n && n ? ' full' : a ? ' part' : '') + '" role="button" tabindex="0" data-t="' + esc(k) + '"><div class="tt-n">' + esc(tname(k)) + '</div><div class="tt-v"><b>' + s + '</b>/' + n + '</div><div class="tt-s">' + (wait > 0 ? '<span class="warnc">待入座 ' + wait + '</span>' : '已報到 ' + a) + '</div><div class="tt-bar"><i class="a" style="width:' + (n ? a * 100 / n : 0) + '%"></i><i class="b" style="width:' + (n ? s * 100 / n : 0) + '%"></i></div></div>';
+      }).join('') + '</div>' + (keys.length ? '' : '<div class="empty">目前沒有貴賓資料</div>');
+    }
+    $('#rtop', root).innerHTML = top;
+    var l = $('#list', root);
+    if (l.innerHTML !== out) { var y = window.scrollY; l.innerHTML = out; if (y) window.scrollTo(0, y); }
+  }
+  function openT(k) { st.t = k; st.q = ''; $('#tb', root).value = ''; U.lsSet('vip.rcTbl', k); upd(); window.scrollTo(0, 0); }
   V.views.reception = {
     mount: function (r) {
       root = r;
-      r.innerHTML = '<div class="bar"><input id="tb" class="inp search" placeholder="🔍 桌次或姓名" inputmode="search" autocomplete="off"></div><div class="tabs" id="tabs"></div><div class="chips scroll" id="fl"></div><div id="list" class="cards"></div>';
-      $('#tb', r).oninput = debounce(function (e) { st.tbl = e.target.value; upd(); }, 100);
+      var last = U.lsGet('vip.rcTbl', ''); st.t = last || null; st.q = '';
+      r.innerHTML = '<div class="bar"><input id="tb" class="inp search" placeholder="🔍 輸入桌號，或貴賓姓名" inputmode="search" autocomplete="off"></div><div class="subbar"><span id="stat" class="stat-pill"></span></div><div id="rtop"></div><div id="list" class="cards"></div>';
+      $('#tb', r).oninput = debounce(function (e) { st.q = e.target.value; upd(); }, 100);
       r.onclick = function (e) {
-        var b = e.target.closest('[data-a],[data-tab],[data-f]'); if (!b) return;
-        if (b.dataset.tab) { st.tab = b.dataset.tab; upd(); return; }
-        if (b.dataset.f) { st.f = b.dataset.f; upd(); return; }
-        var id = b.closest('[data-id]').dataset.id, a = b.dataset.a;
-        if (a === 'cl') V.stage(id, 'cl', 1);
-        else if (a === 'uncl') V.stage(id, 'cl', 0);
-        else if (a === 'take') { V.stage(id, 'cl', 0); V.stage(id, 'cl', 1); }
-        else if (a === 'se') { V.stage(id, 'se', 1); }
+        var t = e.target.closest('[data-t]'); if (t) { openT(t.dataset.t); return; }
+        var tb = e.target.closest('.tbl-badge[data-tbl]'); if (tb) { openT(tb.dataset.tbl); return; }
+        if (e.target.closest('#rc-back')) { st.t = null; U.lsDel('vip.rcTbl'); upd(); return; }
+        if (e.target.closest('#rc-all')) {
+          var g = V.list().filter(function (x) { return tkey(x) === st.t && x.ci && !x.se; });
+          V.confirm('把「' + esc(tname(st.t)) + '」已報到的 ' + g.length + ' 位貴賓，全部標記為已入座？', '全部入座', false).then(function (ok) { if (ok) g.forEach(function (x) { V.stage(x.id, 'se', 1); }); });
+          return;
+        }
+        var b = e.target.closest('[data-a]'); if (!b) return;
+        var id = b.closest('[data-id]').dataset.id, a = b.dataset.a, rec = byId(id);
+        if (a === 'se') V.stage(id, 'se', 1);
         else if (a === 'unse') V.stage(id, 'se', 0);
+        else if (a === 'senc') V.confirm('「' + esc(rec ? rec.name : '') + '」尚未報到。<br>確定直接標記為已入座？（系統會同時補記報到）', '確定入座', false).then(function (ok) { if (ok) V.stage(id, 'se', 1, true); });
       };
+      r.onkeydown = function (e) { var t = e.target.closest && e.target.closest('[data-t]'); if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openT(t.dataset.t); } };
       this.timer = setInterval(upd, 30000);
     },
-    unmount: function () { clearInterval(this.timer); },
+    unmount: function () { clearInterval(this.timer); root = null; },
     update: upd
   };
-  function upd() {
-    if (!root) return;
-    var all = V.list().filter(function (r) { return r.ci; }), q = st.tbl.trim();
-    var wait = all.filter(function (r) { return !r.se; }), seated = all.filter(function (r) { return r.se; });
-    $('#tabs', root).innerHTML = chip('等待帶位 <b>' + wait.length + '</b>', st.tab === 'wait', 'data-tab="wait"') + chip('已入座 <b>' + seated.length + '</b>', st.tab === 'seated', 'data-tab="seated"');
-    var unc = wait.filter(function (r) { return !r.cl; }).length, mine = wait.filter(function (r) { return r.cl && r.clBy === S.staff; }).length;
-    $('#fl', root).innerHTML = st.tab === 'wait' ? chip('全部', st.f === 'all', 'data-f="all"') + chip('未認領 ' + unc, st.f === 'un', 'data-f="un"') + chip('我帶的 ' + mine, st.f === 'me', 'data-f="me"') : '';
-    var arr = (st.tab === 'wait' ? wait : seated).filter(function (r) {
-      if (q && !(U.matches(r, q))) return false;
-      if (st.tab === 'wait') { if (st.f === 'un') return !r.cl; if (st.f === 'me') return r.cl && r.clBy === S.staff; }
-      return true;
-    });
-    arr.sort(st.tab === 'wait' ? function (a, b) { return a.ci - b.ci; } : function (a, b) { return b.se - a.se; });
-    var c = capList(arr, 100), out = '';
-    c.items.forEach(function (r) {
-      var w = U.waitMin(r.ci), mineC = r.cl && r.clBy === S.staff;
-      out += '<div class="card g rc' + (r.cl ? ' claimed' : '') + (mineC ? ' mine' : '') + (r.se ? ' seated' : '') + '" data-id="' + r.id + '"><div class="tbl-badge">' + esc(U.tblLabel(r.tbl) || '未排桌') + '</div><div class="g-main"><div class="g-name">' + esc(r.name) + '</div><div class="g-sub">' + esc(U.addrName(r)) + '</div><div class="g-meta">';
-      if (r.se) out += '✓ 入座 ' + T(r.se) + '（' + esc(r.seBy || '') + '）';
-      else out += '報到 ' + T(r.ci) + ' · <span class="' + (w >= 5 ? 'late' : '') + '">等候 ' + w + ' 分</span> · ' + (r.cl ? '👤 <b>' + esc(r.clBy) + '</b> 帶領中' : '<span class="un">尚未有人認領</span>');
-      out += '</div>' + (r.note ? '<div class="g-meta">📝 ' + esc(r.note) + '</div>' : '') + '</div><div class="g-act">';
-      if (r.se) out += '<button class="btn link" data-a="unse">復原入座</button>';
-      else if (!r.cl) out += '<button class="btn primary xl" data-a="cl">我來帶</button><button class="btn link" data-a="se">直接標記入座</button>';
-      else if (mineC) out += '<button class="btn ok xl" data-a="se">已入座</button><button class="btn link" data-a="uncl">放棄帶領</button>';
-      else out += '<button class="btn ok" data-a="se">已入座</button><button class="btn link" data-a="take">改我來帶</button>';
-      out += '</div></div>';
-    });
-    $('#list', root).innerHTML = (out || '<div class="empty">' + (st.tab === 'wait' ? '目前沒有等待帶位的貴賓 👍' : '尚無已入座貴賓') + '</div>') + moreNote(c.more);
-  }
 })();
 
-/* ================== 舞台組 ================== */
+/* ================== 唱名順序編輯器（舞台組／管理後台共用） ================== */
 (function () {
-  var st = {sort: 'seq', f: 'todo', cat: '', showAbs: false, fs: +U.lsGet('vip.stageFs', '1')};
-  var root;
+  V.mountOrder = function (el, opts) {
+    var st = {q: ''}, self = {};
+    el.innerHTML = '<div class="ord-tools"><button class="btn" data-o="seq">📑 依名單序號自動排序</button><button class="btn" data-o="addall">＋ 加入全部尚未排的貴賓</button><button class="btn" data-o="print">🖨 列印順序</button><button class="btn danger" data-o="clear">清除全部順序</button></div>' +
+      '<div class="muted small ord-hint">順序 1 最先唱名。可用 ▲▼ 調整，或直接改左邊的數字（例如把 30 改成 2，就會移到第 2 位）。</div><div id="ord-sum" class="ord-sum"></div><div id="ord-list" class="ord-list"></div>' +
+      '<section class="pnl ord-add"><h3>＋ 加入貴賓到唱名順序</h3><input id="ord-q" class="inp search" placeholder="🔍 搜尋尚未排順序的貴賓（姓名／單位／職稱）" autocomplete="off"><div id="ord-res"></div></section>';
+    function arr() { return V.orderedList().ordered; }
+    function commit(a) { var pairs = []; a.forEach(function (r, i) { pairs.push([r.id, i + 1]); }); return V.setOrder(pairs); }
+    function upd() {
+      var o = V.orderedList(), a = o.ordered, rest = o.rest;
+      var an = a.filter(function (r) { return r.an; }).length;
+      $('#ord-sum', el).innerHTML = '已排順序 <b>' + a.length + '</b> 位' + (an ? '（已唱名 ' + an + '）' : '') + ' ・ 尚未排順序 <b>' + rest.length + '</b> 位';
+      var act = document.activeElement;
+      if (!(act && act.classList && act.classList.contains('ord-n') && el.contains(act))) {
+        var h = '';
+        a.forEach(function (r, i) {
+          h += '<div class="ord-row' + (r.an ? ' done' : '') + '" data-id="' + r.id + '"><input class="inp ord-n" inputmode="numeric" value="' + (i + 1) + '" aria-label="順序"><div class="ord-who"><b>' + esc(r.name) + '</b><span class="muted">' + esc(U.addrName(r)) + (r.tbl ? ' ・ ' + esc(U.tblLabel(r.tbl)) : '') + '</span></div>' + statusChip(r) +
+            '<div class="ord-btns"><button class="btn sm" data-o="up" aria-label="上移"' + (i ? '' : ' disabled') + '>▲</button><button class="btn sm" data-o="dn" aria-label="下移"' + (i < a.length - 1 ? '' : ' disabled') + '>▼</button><button class="btn sm" data-o="rm" aria-label="移出順序">✕</button></div></div>';
+        });
+        $('#ord-list', el).innerHTML = h || '<div class="empty">還沒有設定唱名順序。<br>可按上方「依名單序號自動排序」，或在下方搜尋加入貴賓。</div>';
+      }
+      var q = st.q.trim(), res = rest.filter(function (r) { return !q || U.matches(r, q); }), c = capList(res, 30), rh = '';
+      c.items.forEach(function (r) { rh += '<div class="ord-row add" data-id="' + r.id + '"><div class="ord-who"><b>' + esc(r.name) + '</b><span class="muted">' + esc(U.addrName(r)) + '</span></div>' + (r.rsvp === '請假' ? '<span class="tag warn">請假</span>' : '') + '<button class="btn sm primary" data-o="add">＋ 加到最後</button></div>'; });
+      $('#ord-res', el).innerHTML = rh ? rh + moreNote(c.more) : '<div class="muted small pad">' + (rest.length ? '沒有符合的貴賓' : '所有貴賓都已排入順序') + '</div>';
+    }
+    $('#ord-q', el).oninput = debounce(function (e) { st.q = e.target.value; upd(); }, 100);
+    el.onclick = function (e) {
+      var b = e.target.closest('[data-o]'); if (!b) return;
+      var o = b.dataset.o, a = arr(), row = b.closest('[data-id]'), id = row ? row.dataset.id : '', i = -1;
+      a.forEach(function (r, k) { if (r.id === id) i = k; });
+      if (o === 'up' && i > 0) { var x = a[i]; a[i] = a[i - 1]; a[i - 1] = x; commit(a); }
+      else if (o === 'dn' && i >= 0 && i < a.length - 1) { var y = a[i]; a[i] = a[i + 1]; a[i + 1] = y; commit(a); }
+      else if (o === 'rm' && i >= 0) { var rr = a.splice(i, 1)[0]; V.setOrder([[rr.id, 0]]).then(function () { commit(arr()); }); }
+      else if (o === 'add') { var rec = byId(id); if (rec) { a.push(rec); commit(a); } }
+      else if (o === 'print') V.printOrder();
+      else if (o === 'seq') {
+        V.confirm('依「名單序號」重新排列？現有的順序會被取代。', '重新排序', false).then(function (ok) {
+          if (!ok) return; V.ordApi({cmd: 'seq'}).then(function (r) { if (r && r.ok) V.toast('已依序號排好 ' + (r.changed || 0) + ' 位'); });
+        });
+      }
+      else if (o === 'addall') {
+        var rest = V.orderedList().rest.filter(function (r) { return r.rsvp !== '請假'; });
+        if (!rest.length) { V.toast('沒有需要加入的貴賓'); return; }
+        commit(a.concat(rest)).then(function () { V.toast('已加入 ' + rest.length + ' 位到順序最後'); });
+      }
+      else if (o === 'clear') {
+        if (!a.length) return;
+        V.confirm('清除全部 ' + a.length + ' 位的唱名順序？（已唱名的紀錄不受影響）', '清除', true).then(function (ok) { if (ok) V.ordApi({cmd: 'clear'}).then(function () { V.toast('已清除順序'); }); });
+      }
+    };
+    el.onchange = function (e) {
+      var n = e.target.closest('.ord-n'); if (!n) return;
+      var a = arr(), id = n.closest('[data-id]').dataset.id, i = -1, v = parseInt(n.value, 10);
+      a.forEach(function (r, k) { if (r.id === id) i = k; });
+      if (i < 0 || !(v >= 1)) { upd(); return; }
+      var it = a.splice(i, 1)[0]; a.splice(Math.min(v, a.length + 1) - 1, 0, it); n.blur(); commit(a);
+    };
+    el.onkeydown = function (e) { if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('ord-n')) e.target.blur(); };
+    self.update = upd; self.unmount = function () { el.onclick = null; el.onchange = null; };
+    return self;
+  };
+})();
+
+/* ================== 舞台組：主持人唱名順序 ================== */
+(function () {
+  var st = {tab: 'host', f: 'todo', q: '', fs: +U.lsGet('vip.stageFs', '1')};
+  var root, editor = null;
+  function hostRow(r, i) {
+    var fresh = r.ci && !r.an && Date.now() - r.ci < 180000;
+    return '<div class="sc' + (r.an ? ' done' : '') + (!r.ci ? ' abs' : '') + (fresh ? ' fresh' : '') + '" data-id="' + r.id + '"><div class="sc-seq">' + (+r.ord > 0 ? r.ord : '—') + '</div><div class="sc-main"><div class="sc-org">' + esc(U.addrName(r)) + '</div><div class="sc-name">' + esc(r.name) + '</div>' +
+      '<div class="sc-meta">' + statusChip(r) + (r.cat ? ' <span class="tag">' + esc(r.cat) + '</span>' : '') + (r.tbl ? ' ・ ' + esc(U.tblLabel(r.tbl)) : '') + (r.rsvp === '請假' ? ' <span class="tag warn">請假</span>' : '') + (r.note ? ' ・ 📝' + esc(r.note) : '') + '</div></div><div class="sc-act">' +
+      (r.an ? '<div class="an-done">✓ 已唱名<br><b>' + U.fmtTS(r.an) + '</b></div><button class="btn link" data-a="unan">復原</button>' : '<button class="btn primary xxl" data-a="an">唱名</button>') + '</div></div>';
+  }
+  function upd() {
+    if (!root) return;
+    root.className = 'v-stage fs' + st.fs;
+    var tabs = chip('🎤 主持人唱名', st.tab === 'host', 'data-t="host"') + chip('↕ 設定唱名順序', st.tab === 'edit', 'data-t="edit"');
+    var tb = $('#stabs', root); if (tb.innerHTML !== tabs) tb.innerHTML = tabs;
+    $('#shost', root).style.display = st.tab === 'host' ? '' : 'none';
+    $('#sedit', root).style.display = st.tab === 'edit' ? '' : 'none';
+    if (st.tab === 'edit') { if (!editor) editor = V.mountOrder($('#sedit', root)); editor.update(); return; }
+    $('#fs', root).textContent = '字級 ' + ['', 'A', 'A+', 'A++'][st.fs];
+    var o = V.orderedList(), a = o.ordered, all = V.list();
+    var done = a.filter(function (r) { return r.an; }), todo = a.filter(function (r) { return !r.an; });
+    var seatedTodo = todo.filter(function (r) { return r.se; }).length, arrTodo = todo.filter(function (r) { return r.ci && !r.se; }).length;
+    $('#stats', root).innerHTML = '<div class="sp"><span>順序內</span><b>' + a.length + '</b></div><div class="sp ok"><span>已唱名</span><b>' + done.length + '</b></div><div class="sp hot"><span>待唱名</span><b>' + todo.length + '</b></div><div class="sp"><span>待唱名・已入座</span><b>' + seatedTodo + '</b></div>';
+    var nx = todo[0];
+    $('#next', root).innerHTML = nx ? '<div class="nx-l">⏭ 下一位（第 ' + nx.ord + ' 順位）</div><div class="nx-org">' + esc(U.addrName(nx)) + '</div><div class="nx-name">' + esc(nx.name) + '</div><div class="nx-s">' + statusChip(nx) + (nx.tbl ? ' ・ ' + esc(U.tblLabel(nx.tbl)) : '') + '</div><div data-id="' + nx.id + '"><button class="btn primary xxl" data-a="an">唱名</button></div>' :
+      (a.length ? '<div class="nx-l">🎉 順序內的貴賓已全部唱名完畢</div>' : '');
+    $('#sfl', root).innerHTML = chip('待唱名 ' + todo.length, st.f === 'todo', 'data-f="todo"') + chip('已唱名 ' + done.length, st.f === 'done', 'data-f="done"') + chip('全部', st.f === 'all', 'data-f="all"');
+    var q = st.q.trim();
+    var arr = a.filter(function (r) { return (st.f === 'all' || (st.f === 'todo' ? !r.an : !!r.an)) && (!q || U.matches(r, q)); });
+    if (st.f === 'todo' && !q && nx) arr = arr.slice(1);   // 第一位已在「下一位」大卡片
+    var c = capList(arr, 150), out = '';
+    if (st.f === 'todo' && !q && nx && arr.length) out += '<div class="sec">之後的順序</div>';
+    out += c.items.map(hostRow).join('') + moreNote(c.more);
+    if (!a.length) out = '<div class="empty">尚未設定唱名順序。<br>請按上方「↕ 設定唱名順序」，或請管理員在後台設定。</div>';
+    else if (!arr.length && !nx) out = '<div class="empty">目前沒有符合的貴賓</div>';
+    var extra = o.rest.filter(function (r) { return r.ci && !r.an; });
+    if (st.f !== 'done' && !q && extra.length) out += '<div class="sec">未排順序但已到場 · ' + extra.length + '（臨時加入的貴賓）</div>' + extra.slice(0, 30).map(hostRow).join('');
+    var lst = $('#list', root); if (lst.innerHTML !== out) lst.innerHTML = out;
+  }
   V.views.stage = {
     mount: function (r) {
-      root = r;
-      r.innerHTML = '<div class="stage-top"><div class="stage-stats" id="stats"></div><div class="stage-ctl"><select id="cat" class="inp sm"></select><button class="btn sm" id="fs">字級 A</button><button class="btn sm" id="pr">🖨 列印</button></div></div>' +
-        '<div class="chips" id="fl"></div><div id="list" class="stage-list"></div>';
-      var self = this;
-      $('#cat', r).onchange = function (e) { st.cat = e.target.value; upd(); };
+      root = r; editor = null;
+      r.innerHTML = '<div class="chips" id="stabs"></div><div id="shost"><div class="stage-top"><div class="stage-stats" id="stats"></div><div class="stage-ctl"><input id="sq" class="inp sm" placeholder="🔍 搜尋" autocomplete="off"><button class="btn sm" id="fs">字級 A</button><button class="btn sm" id="pr">🖨 列印</button></div></div>' +
+        '<div class="next-card" id="next"></div><div class="chips" id="sfl"></div><div id="list" class="stage-list"></div></div><div id="sedit" style="display:none"></div>';
+      $('#sq', r).oninput = debounce(function (e) { st.q = e.target.value; upd(); }, 100);
       $('#fs', r).onclick = function () { st.fs = st.fs % 3 + 1; U.lsSet('vip.stageFs', st.fs); upd(); };
-      $('#pr', r).onclick = function () { printList(); };
+      $('#pr', r).onclick = function () { V.printOrder(); };
       r.onclick = function (e) {
-        var b = e.target.closest('[data-a],[data-f]'); if (!b) return;
-        if (b.dataset.f) { var f = b.dataset.f; if (f === 'sortseq') st.sort = 'seq'; else if (f === 'sortnew') st.sort = 'new'; else if (f === 'abs') st.showAbs = !st.showAbs; else st.f = f; upd(); return; }
+        var t = e.target.closest('[data-t]'); if (t && t.closest('#stabs')) { st.tab = t.dataset.t; upd(); return; }
+        var f = e.target.closest('#sfl [data-f]'); if (f) { st.f = f.dataset.f; upd(); return; }
+        var b = e.target.closest('[data-a]'); if (!b) return;
         var id = b.closest('[data-id]').dataset.id;
         if (b.dataset.a === 'an') V.stage(id, 'an', 1); else if (b.dataset.a === 'unan') V.stage(id, 'an', 0);
       };
       this.timer = setInterval(upd, 20000);
     },
-    unmount: function () { clearInterval(this.timer); },
+    unmount: function () { clearInterval(this.timer); if (editor) editor.unmount(); editor = null; root = null; },
     update: upd
   };
-  function upd() {
-    if (!root) return;
-    root.className = 'v-stage fs' + st.fs;
-    $('#fs', root).textContent = '字級 ' + ['', 'A', 'A+', 'A++'][st.fs];
-    var cs = $('#cat', root); if (cs.options.length - 1 !== ((S.ev && S.ev.cats) || []).length) cs.innerHTML = catOptions(st.cat, true);
-    var all = V.list(), arrived = all.filter(function (r) { return r.ci; }), an = arrived.filter(function (r) { return r.an; });
-    $('#stats', root).innerHTML = '<div class="sp"><span>預計</span><b>' + all.filter(U.isExpected).length + '</b></div><div class="sp"><span>已到</span><b>' + arrived.length + '</b></div><div class="sp ok"><span>已唱名</span><b>' + an.length + '</b></div><div class="sp hot"><span>待唱名</span><b>' + (arrived.length - an.length) + '</b></div><div class="sp"><span>未到</span><b>' + all.filter(function (r) { return U.isExpected(r) && !r.ci; }).length + '</b></div>';
-    $('#fl', root).innerHTML = chip('待唱名', st.f === 'todo', 'data-f="todo"') + chip('已唱名', st.f === 'done', 'data-f="done"') + chip('全部到場', st.f === 'all', 'data-f="all"') + '<span class="sepv"></span>' +
-      chip('依唱名順序(序)', st.sort === 'seq', 'data-f="sortseq"') + chip('最新抵達優先', st.sort === 'new', 'data-f="sortnew"') + '<span class="sepv"></span>' + chip('顯示未到貴賓', st.showAbs, 'data-f="abs"');
-    var arr = all.filter(function (r) {
-      if (st.cat && r.cat !== st.cat) return false;
-      if (!r.ci) return st.showAbs && U.isExpected(r) && st.f !== 'done';
-      return st.f === 'all' || (st.f === 'todo' ? !r.an : !!r.an);
-    });
-    arr.sort(function (a, b) {
-      var an = a.ci ? 0 : 1, bn = b.ci ? 0 : 1; if (an !== bn) return an - bn;
-      if (st.sort === 'new') return (b.ci || 0) - (a.ci || 0) || (a.seq || 0) - (b.seq || 0);
-      return (a.seq || 99999) - (b.seq || 99999);
-    });
-    var c = capList(arr, 150), out = '', now = Date.now();
-    c.items.forEach(function (r) {
-      var fresh = r.ci && !r.an && now - r.ci < 180000;
-      out += '<div class="sc' + (r.an ? ' done' : '') + (!r.ci ? ' abs' : '') + (fresh ? ' fresh' : '') + '" data-id="' + r.id + '"><div class="sc-seq">' + (r.seq && r.seq < 99999 ? r.seq : '新') + '</div><div class="sc-main"><div class="sc-org">' + esc(U.addrName(r)) + '</div><div class="sc-name">' + esc(r.name) + '</div>' +
-        '<div class="sc-meta">' + (r.cat ? '<span class="tag">' + esc(r.cat) + '</span>' : '') + (r.ci ? '到場 <b>' + T(r.ci) + '</b>' : '<span class="late">尚未到場</span>') + (r.ci ? (r.se ? ' ・ <span class="okc">已入座 ' + T(r.se) + '</span>' : ' ・ <span class="warnc">尚未入座</span>') : '') + (r.tbl ? ' ・ ' + esc(U.tblLabel(r.tbl)) : '') + (fresh ? ' <span class="tag hot">NEW</span>' : '') + (r.note ? ' ・ 📝' + esc(r.note) : '') + '</div></div><div class="sc-act">';
-      if (!r.ci) out += '<div class="muted">未到</div>';
-      else if (r.an) out += '<div class="an-done">✓ 已唱名<br><b>' + T(r.an) + '</b></div><button class="btn link" data-a="unan">復原</button>';
-      else out += '<button class="btn primary xxl" data-a="an">唱名</button>';
-      out += '</div></div>';
-    });
-    $('#list', root).innerHTML = (out || '<div class="empty">目前沒有符合的貴賓</div>') + moreNote(c.more);
-  }
-  function printList() {
-    var all = V.list().filter(function (r) { return !st.cat || r.cat === st.cat; }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); });
-    var h = '<div id="print-area"><h2>' + esc(S.ev ? S.ev.name : '') + ' 司儀唱名表</h2><table><tr><th>序</th><th>類別</th><th>單位</th><th>職稱</th><th>姓名</th><th>桌次</th><th>唱名</th></tr>';
-    all.forEach(function (r) { h += '<tr><td>' + (r.seq && r.seq < 99999 ? r.seq : '') + '</td><td>' + esc(r.cat) + '</td><td>' + esc(r.org) + '</td><td>' + esc(r.title) + '</td><td><b>' + esc(r.name) + '</b></td><td>' + esc(U.tblLabel(r.tbl)) + '</td><td>☐</td></tr>'; });
-    V.printHtml(h + '</table></div>');
-  }
 })();
-
 
 /* ================== 全部貴賓狀態（所有組別共用・唯讀） ================== */
 (function () {
   var st = {mode: 'guest', f: 'all', q: ''};
   var root;
-  var STEPS = [['pk', '接到'], ['dl', '送達'], ['ci', '報到'], ['cl', '帶領'], ['se', '入座'], ['an', '唱名']];
-  var FL = [['all', '全部'], ['none', '尚未開始'], ['pk', '接送中'], ['dl', '已到門口'], ['ci', '已報到'], ['cl', '帶領中'], ['se', '已入座'], ['an', '已唱名']];
+  var STEPS = [['ci', '報到'], ['se', '入座'], ['an', '唱名']];
+  var FL = [['all', '全部'], ['none', '尚未報到'], ['ci', '已報到・待入座'], ['se', '已入座'], ['an', '已唱名']];
   function key(r) { return U.stageKey(r) || 'none'; }
   function stepsHtml(r) {
     return '<div class="ag-steps">' + STEPS.map(function (x) {
       var k = x[0], t = r[k];
       if (t) return '<div class="stp on"><span class="sl">' + x[1] + '</span><span class="stt">' + T(t) + '</span><span class="sb">' + esc(r[k + 'By'] || '') + '</span></div>';
-      var na = (k === 'pk' || k === 'dl') && !U.isTr(r);
-      return '<div class="stp' + (na ? ' na' : '') + '"><span class="sl">' + x[1] + '</span><span class="stt">' + (na ? '無接送' : '—') + '</span><span class="sb"></span></div>';
+      return '<div class="stp"><span class="sl">' + x[1] + '</span><span class="stt">—</span><span class="sb"></span></div>';
     }).join('') + '</div>';
   }
   function row(r) {
     var k = key(r), lab = (FL.filter(function (x) { return x[0] === k; })[0] || [0, ''])[1];
     return '<div class="card ag s-' + k + '" data-id="' + r.id + '"><div class="ag-h">' + seqBadge(r) + '<div class="ag-n"><b>' + esc(r.name) + '</b><span class="ag-sub">' + esc(U.addrName(r)) + '</span></div>' +
       '<span class="ag-st s-' + k + '">' + lab + '</span><span class="tbl-badge sm">' + esc(U.tblLabel(r.tbl) || '未排桌') + '</span></div>' +
-      '<div class="g-meta">' + tags(r) + (r.tr ? '<span class="tag">🚐 ' + esc(r.tr) + (r.veh ? ' ' + esc(r.veh) : '') + '</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
+      '<div class="g-meta">' + tags(r) + (+r.ord > 0 ? '<span class="tag">唱名第 ' + r.ord + ' 順位</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
   }
   function tablesHtml(arr) {
     var m = {}, keys = [];
@@ -353,7 +391,7 @@ function moreNote(n) { return n ? '<div class="more-note">還有 ' + n + ' 位�
     mount: function (r) {
       root = r;
       r.innerHTML = '<div class="ro-note">👀 唯讀檢視：這裡看得到所有組別、每位貴賓目前的進度與時間。要操作請按上方「我的工作」。</div>' +
-        '<div class="bar"><input id="aq" class="inp search" placeholder="🔍 搜尋姓名／單位／桌次／車號" autocomplete="off"></div>' +
+        '<div class="bar"><input id="aq" class="inp search" placeholder="🔍 搜尋姓名／單位／桌次" autocomplete="off"></div>' +
         '<div class="chips scroll" id="afl"></div><div class="chips" id="amd"></div><div class="muted small ag-count" id="acount"></div><div id="alist" class="cards"></div>';
       $('#aq', r).value = st.q;
       $('#aq', r).oninput = debounce(function (e) { st.q = e.target.value; upd(); }, 120);
@@ -373,3 +411,4 @@ V.printHtml = function (html) {
   setTimeout(function () { try { window.print(); } catch (e) {} setTimeout(function () { d.remove(); document.body.classList.remove('printing'); }, 500); }, 50);
 };
 })();
+

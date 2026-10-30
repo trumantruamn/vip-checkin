@@ -1,11 +1,11 @@
-/* 後台管理：總覽／活動／匯入／類別／存取碼／匯出列印／設定 */
+/* 後台管理：總覽／活動／匯入／唱名順序／類別／存取碼／匯出列印／設定 */
 (function () {
 'use strict';
 var V = window.VIP, S = V.S, U = V.u, esc = U.esc, T = U.fmtT;
 function $(s, r) { return (r || document).querySelector(s); }
 function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
-var root, tab = U.lsGet('vip.adminTab', 'over');
-var TABS = [['over', '📋 總覽'], ['event', '📅 活動'], ['imp', '📥 匯入名單'], ['cats', '🏷 類別'], ['codes', '🔑 存取碼'], ['out', '📤 匯出列印'], ['set', '⚙️ 設定']];
+var root, tab = U.lsGet('vip.adminTab', 'over'), ordEd = null;
+var TABS = [['over', '📋 總覽'], ['event', '📅 活動'], ['imp', '📥 匯入名單'], ['ord', '🎤 唱名順序'], ['cats', '🏷 類別'], ['codes', '🔑 存取碼'], ['out', '📤 匯出列印'], ['set', '⚙️ 設定']];
 var ov = {q: '', cat: '', f: 'all', limit: 60};
 function admin(cmd, extra) {
   var b = Object.assign({op: 'admin', code: S.code, ev: S.evId, cmd: cmd, staff: S.staff}, extra || {});
@@ -21,21 +21,26 @@ V.views.admin = {
     r.onclick = function (e) { var b = e.target.closest('[data-atab]'); if (b) { tab = b.dataset.atab; U.lsSet('vip.adminTab', tab); render(); } };
     render();
   },
-  update: function () { if (tab === 'over') drawOver(); else if (tab === 'cats') {} else if (tab === 'out') { drawOutStats(); } }
+  update: function () { if (tab === 'over') drawOver(); else if (tab === 'ord' && ordEd) ordEd.update(); else if (tab === 'cats') {} else if (tab === 'out') { drawOutStats(); } },
+  unmount: function () { if (ordEd) ordEd.unmount(); ordEd = null; }
 };
 function render() {
   if (!root) return;
   $('#atabs', root).innerHTML = TABS.map(function (t) { return '<button class="chip' + (tab === t[0] ? ' on' : '') + '" data-atab="' + t[0] + '">' + t[1] + '</button>'; }).join('');
-  var p = $('#apane', root); p.innerHTML = '';
+  var p = $('#apane', root); p.innerHTML = ''; if (ordEd) { ordEd.unmount(); ordEd = null; }
   if (!S.evId && tab !== 'event') { p.innerHTML = '<div class="empty">請先到「活動」建立或選擇一個活動</div>'; return; }
-  ({over: paneOver, event: paneEvent, imp: paneImport, cats: paneCats, codes: paneCodes, out: paneOut, set: paneSet})[tab](p);
+  ({over: paneOver, event: paneEvent, imp: paneImport, ord: paneOrd, cats: paneCats, codes: paneCodes, out: paneOut, set: paneSet})[tab](p);
 }
 
 /* ---------- 總覽 ---------- */
-var STG = ['pk', 'dl', 'ci', 'cl', 'se', 'an'], STL = {pk: '接到', dl: '送達', ci: '報到', cl: '認領', se: '入座', an: '唱名'};
+var STG = ['ci', 'se', 'an'], STL = {ci: '報到', se: '入座', an: '唱名'};
+function paneOrd(p) {
+  p.innerHTML = '<div class="pnl"><h3>🎤 主持人唱名順序</h3><p class="muted small">在這裡排好順序，主持人（舞台組）的畫面會依這個順序顯示、並可按「唱名」。舞台組也能自己調整。也可以在「匯入名單」用 Excel 的「唱名順序」欄一次匯入。</p><div id="ordbox"></div></div>';
+  ordEd = V.mountOrder($('#ordbox', p), {admin: true}); ordEd.update();
+}
 function paneOver(p) {
   p.innerHTML = '<div class="bar"><input id="oq" class="inp search" placeholder="🔍 搜尋姓名／單位／桌次" value="' + esc(ov.q) + '"><button class="btn primary" id="oadd">＋ 新增貴賓</button></div>' +
-    '<div class="subbar"><select id="ocat" class="inp sm">' + V.catOptions(ov.cat, true) + '</select><select id="of" class="inp sm"><option value="all">全部狀態</option><option value="absent">未到</option><option value="ci">已報到</option><option value="wait">等待帶位</option><option value="se">已入座</option><option value="an">已唱名</option><option value="tr">需接送</option></select><span id="ocount" class="stat-pill"></span></div>' +
+    '<div class="subbar"><select id="ocat" class="inp sm">' + V.catOptions(ov.cat, true) + '</select><select id="of" class="inp sm"><option value="all">全部狀態</option><option value="absent">未到</option><option value="ci">已報到</option><option value="wait">已報到・待入座</option><option value="se">已入座</option><option value="an">已唱名</option><option value="ord">已排唱名順序</option></select><span id="ocount" class="stat-pill"></span></div>' +
     '<div class="twrap"><table class="tbl big" id="otbl"></table></div><div id="omore"></div>';
   $('#of', p).value = ov.f;
   $('#oq', p).oninput = debounce(function (e) { ov.q = e.target.value; ov.limit = 60; drawOver(); }, 120);
@@ -62,16 +67,16 @@ function drawOver() {
   var all = V.list(), shown = all.filter(function (r) {
     if (ov.cat && r.cat !== ov.cat) return false;
     if (!U.matches(r, ov.q)) return false;
-    switch (ov.f) { case 'absent': return U.isExpected(r) && !r.ci; case 'ci': return !!r.ci; case 'wait': return r.ci && !r.se; case 'se': return !!r.se; case 'an': return !!r.an; case 'tr': return U.isTr(r); }
+    switch (ov.f) { case 'absent': return U.isExpected(r) && !r.ci; case 'ci': return !!r.ci; case 'wait': return r.ci && !r.se; case 'se': return !!r.se; case 'an': return !!r.an; case 'ord': return +r.ord > 0; }
     return true;
   }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); });
   $('#ocount', p).textContent = shown.length + ' / ' + all.length + ' 位';
   var focus = document.activeElement && document.activeElement.closest && document.activeElement.closest('#otbl');
   if (focus && document.activeElement.tagName === 'INPUT') return;   // 正在編輯時不重繪
-  var h = '<tr><th>序</th><th>姓名</th><th>單位／職稱</th><th>類別</th><th>桌次</th><th>接送</th>' + STG.map(function (s) { return '<th>' + STL[s] + '</th>'; }).join('') + '<th></th></tr>';
+  var h = '<tr><th>序</th><th>姓名</th><th>單位／職稱</th><th>類別</th><th>桌次</th><th>唱名順序</th>' + STG.map(function (s) { return '<th>' + STL[s] + '</th>'; }).join('') + '<th></th></tr>';
   shown.slice(0, ov.limit).forEach(function (r) {
     h += '<tr data-id="' + r.id + '"><td>' + (r.seq && r.seq < 99999 ? r.seq : '') + '</td><td class="nm"><b>' + esc(r.name) + '</b>' + (r.walk ? ' <span class="tag walk">現場</span>' : '') + (r.rsvp === '請假' ? ' <span class="tag warn">請假</span>' : '') + '</td><td class="org">' + esc(U.addrName(r)) + '</td>' +
-      '<td><select class="inp sm" data-f="cat">' + V.catOptions(r.cat, false) + '</select></td><td><input class="inp sm tin" data-f="tbl" value="' + esc(r.tbl || '') + '" placeholder="桌次"></td><td class="sm">' + esc([r.tr, r.veh].filter(Boolean).join(' / ')) + '</td>' +
+      '<td><select class="inp sm" data-f="cat">' + V.catOptions(r.cat, false) + '</select></td><td><input class="inp sm tin" data-f="tbl" value="' + esc(r.tbl || '') + '" placeholder="桌次"></td><td><input class="inp sm tin" data-f="ord" inputmode="numeric" value="' + (+r.ord > 0 ? r.ord : '') + '" placeholder="順序"></td>' +
       STG.map(function (s) { return '<td class="stg ' + (r[s] ? 'on' : '') + '" data-stg="' + s + '" title="' + esc(r[s] ? (r[s + 'By'] || '') : '點擊手動標記') + '">' + (r[s] ? T(r[s]) + '<small>' + esc(r[s + 'By'] || '') + '</small>' : '–') + '</td>'; }).join('') + '<td><button class="btn sm" data-edit>編輯</button></td></tr>';
   });
   tb.innerHTML = h;
@@ -79,7 +84,7 @@ function drawOver() {
 }
 function guestModal(id) {
   var r = id ? V.get(id) : {}, f = {};
-  var fields = [['seq', '序'], ['name', '姓名 *'], ['org', '單位名稱'], ['title', '職稱'], ['rsvp', '回覆情形'], ['grp', '報到組別'], ['tbl', '桌次/座位'], ['tr', '接送人員'], ['veh', '車號'], ['pl', '接送地點'], ['note', '備註']];
+  var fields = [['seq', '序'], ['name', '姓名 *'], ['org', '單位名稱'], ['title', '職稱'], ['rsvp', '回覆情形'], ['grp', '報到組別'], ['tbl', '桌次/座位'], ['ord', '唱名順序（數字，空白＝不排）'], ['note', '備註']];
   var h = '<h3>' + (id ? '編輯貴賓' : '新增貴賓') + '</h3><div class="form">';
   fields.forEach(function (x) { h += '<label>' + x[1] + '<input class="inp" id="f-' + x[0] + '" value="' + esc(r[x[0]] || '') + '"></label>'; });
   h += '<label>類別<select class="inp" id="f-cat">' + V.catOptions(r.cat, false) + '</select></label></div><div class="m-btns">' + (id ? '<button class="btn danger" id="f-del">刪除</button>' : '') + '<button class="btn" data-close>取消</button><button class="btn primary" id="f-ok">儲存</button></div>';
@@ -88,6 +93,7 @@ function guestModal(id) {
     fields.concat([['cat']]).forEach(function (x) { f[x[0]] = $('#f-' + x[0], m).value.trim(); });
     if (!f.name) { V.toast('姓名必填', 'bad'); return; }
     if (f.seq) f.seq = +f.seq || 0;
+    f.ord = +f.ord > 0 ? +f.ord : 0;
     if (id) V.act({a: 'edit', g: id, f: f}); else V.act({a: 'add', g: 'a' + U.uid(9), f: f});
     m.close();
   };
@@ -126,12 +132,11 @@ function paneEvent(p) {
 
 /* ---------- 匯入 ---------- */
 var ALIAS = {
-  seq: ['序', '序號', '順序', '編號', 'no', 'no.', '#', '唱名順序'], cat: ['類別', '分類', '身分別', '類型', '貴賓類別'], org: ['單位名稱', '單位', '機關', '公司', '組織', '服務單位', '機關團體'],
+  seq: ['序', '序號', '順序', '編號', 'no', 'no.', '#'], ord: ['唱名順序', '唱名序', '主持順序', '主持人順序', '主持人唱名順序', '唱名'], cat: ['類別', '分類', '身分別', '類型', '貴賓類別'], org: ['單位名稱', '單位', '機關', '公司', '組織', '服務單位', '機關團體'],
   title: ['職稱', '職銜', '頭銜', '職務'], name: ['姓名', '名字', '貴賓姓名', '貴賓'], rsvp: ['回覆情形', '回覆', '出席情形', '出席回覆', '是否出席'],
-  grp: ['報到組別', '報到組', '組別'], tbl: ['桌次/座位', '桌次', '桌號', '座位', '席次', '桌次座位'], note: ['備註', '說明', '附註'],
-  tr: ['接送人員', '接送', '交通', '司機', '駕駛', '接送司機', '交通接送'], veh: ['車號', '車牌', '車輛', '車牌號碼'], pl: ['接送地點', '上車地點', '接送地', '集合地點', '地點']
+  grp: ['報到組別', '報到組', '組別'], tbl: ['桌次/座位', '桌次', '桌號', '座位', '席次', '桌次座位'], note: ['備註', '說明', '附註']
 };
-var FIELD_LABEL = {seq: '序', cat: '類別', org: '單位名稱', title: '職稱', name: '姓名', rsvp: '回覆情形', grp: '報到組別', tbl: '桌次/座位', note: '備註', tr: '接送人員', veh: '車號', pl: '接送地點'};
+var FIELD_LABEL = {seq: '序', cat: '類別', org: '單位名稱', title: '職稱', name: '姓名', rsvp: '回覆情形', grp: '報到組別', tbl: '桌次/座位', note: '備註', ord: '唱名順序'};
 function cleanH(s) { return String(s == null ? '' : s).replace(/[\s\u3000*＊（）()]/g, '').toLowerCase(); }
 function mapHeaders(row) {
   var map = {}, used = {};
@@ -162,6 +167,7 @@ function toRows(best) {
   best.data.forEach(function (r) {
     var o = {}; for (var i in best.map) o[best.map[i]] = String(r[i] == null ? '' : r[i]).trim();
     if (o.seq) o.seq = parseInt(o.seq, 10) || 0;
+    if (o.ord) o.ord = parseFloat(o.ord) > 0 ? parseFloat(o.ord) : 0;
     out.push(o);
   });
   return out;
@@ -198,9 +204,9 @@ function showPreview(prev, best, fname) {
   var names = {}, dups = []; valid.forEach(function (r) { var k = r.name + '|' + (r.org || ''); if (names[k]) dups.push(r.name); names[k] = 1; });
   var cats = {}; valid.forEach(function (r) { if (r.cat) cats[r.cat] = 1; });
   var evCats = (S.ev && S.ev.cats) || [], newCats = Object.keys(cats).filter(function (c) { return evCats.indexOf(c) < 0; });
-  var hasTr = valid.filter(function (r) { return r.tr || r.veh || r.pl; }).length;
+  var hasOrd = valid.filter(function (r) { return +r.ord > 0; }).length;
   var cols = Object.keys(best.map).map(function (k) { return best.map[k]; });
-  var h = '<div class="ok-box">檔案「' + esc(fname) + '」工作表「' + esc(best.sheet) + '」：共 <b>' + valid.length + '</b> 位貴賓' + (skipped ? '（略過 ' + skipped + ' 列沒有姓名）' : '') + '，其中 ' + hasTr + ' 位有接送資訊。</div>';
+  var h = '<div class="ok-box">檔案「' + esc(fname) + '」工作表「' + esc(best.sheet) + '」：共 <b>' + valid.length + '</b> 位貴賓' + (skipped ? '（略過 ' + skipped + ' 列沒有姓名）' : '') + '，其中 ' + hasOrd + ' 位有填「唱名順序」。</div>';
   h += '<div class="muted small">辨識到的欄位：' + cols.map(function (c) { return '<span class="tag">' + FIELD_LABEL[c] + '</span>'; }).join(' ') + '</div>';
   if (dups.length) h += '<div class="warn-box">⚠ 有 ' + dups.length + ' 筆「姓名＋單位」重複：' + esc(dups.slice(0, 6).join('、')) + (dups.length > 6 ? '…' : '') + '</div>';
   if (newCats.length) h += '<div class="warn-box">新類別會自動加入：' + esc(newCats.join('、')) + '</div>';
@@ -251,21 +257,16 @@ function linkBase() { return location.origin + location.pathname.replace(/[^/]*$
 function paneCodes(p) {
   function draw(codes) {
     var base = linkBase(), extra = (!window.VIP_CONFIG.API_URL && V.apiUrl && !V.demo) ? '&api=' + encodeURIComponent(V.apiUrl) : '';
-    var h = '<div class="pnl"><h3>🔑 存取碼與連結</h3><p class="muted">只有兩組碼：<b>工作人員共用碼</b>（四個工作組共用，登入後在手機上選自己的組別）與<b>總召專用碼</b>（只能看、不能操作）。' + (V.demo ? '<br><b>預覽模式：連結只在這個瀏覽器有效。</b>' : '') + '</p>';
-    var defs = [
-      ['staff', '👥 工作人員共用碼', '交通組・報到組・接待組・舞台組 共用', '登入後自己選組別，隨時可切換。每一組只能按自己負責的步驟，但看得到所有組別的進度。', '工作人員報到系統連結'],
-      ['director', '📊 活動總召專用碼', '只能看，不能操作', '即時總覽儀表板，無法按任何動作按鈕。', '活動總召儀表板連結']
-    ];
-    defs.forEach(function (d) {
-      var k = d[0], c = codes[k] || '', link = base + '?c=' + c + extra;
-      h += '<div class="coderow" data-code-role="' + k + '"><div class="cr-h"><b>' + d[1] + '</b> <span class="muted small">' + d[2] + '</span></div><div class="cr-note">' + d[3] + '</div><div class="cr-c">' + esc(c) + '</div><input class="inp sm" readonly value="' + esc(link) + '" onclick="this.select()">' +
-        '<div class="cr-b"><button class="btn sm" data-copy="' + esc(link) + '">複製連結</button><a class="btn sm" target="_blank" rel="noopener" href="https://line.me/R/msg/text/?' + encodeURIComponent(d[4] + '（存取碼 ' + c + '）\n' + link) + '">LINE 分享</a><a class="btn sm" target="_blank" href="' + esc(link) + '">開啟</a><button class="btn sm danger" data-regen="' + k + '">重新產生</button></div></div>';
-    });
+    var h = '<div class="pnl"><h3>🔑 存取碼與連結</h3><p class="muted">只要一組碼：<b>工作人員共用碼</b>。報到、接待、舞台、總召都用同一個碼進入同一個畫面，進去後在上方分頁選自己的組別（總召分頁只能看、不能操作）。' + (V.demo ? '<br><b>預覽模式：連結只在這個瀏覽器有效。</b>' : '') + '</p>';
+    var d = ['staff', '👥 工作人員共用碼', '報到組・接待組・舞台組・總召 共用', '登入後自己選組別，隨時可切換。每一組只能按自己負責的步驟，但看得到所有組別的進度；總召分頁為唯讀。', '貴賓報到系統連結'];
+    var k = d[0], c = codes[k] || '', link = base + '?c=' + c + extra;
+    h += '<div class="coderow" data-code-role="' + k + '"><div class="cr-h"><b>' + d[1] + '</b> <span class="muted small">' + d[2] + '</span></div><div class="cr-note">' + d[3] + '</div><div class="cr-c">' + esc(c) + '</div><input class="inp sm" readonly value="' + esc(link) + '" onclick="this.select()">' +
+      '<div class="cr-b"><button class="btn sm" data-copy="' + esc(link) + '">複製連結</button><a class="btn sm" target="_blank" rel="noopener" href="https://line.me/R/msg/text/?' + encodeURIComponent(d[4] + '（存取碼 ' + c + '）\n' + link) + '">LINE 分享</a><a class="btn sm" target="_blank" href="' + esc(link) + '">開啟</a><button class="btn sm danger" data-regen="' + k + '">重新產生</button></div></div>';
     h += '<div class="coderow"><div class="cr-h"><b>⚙️ 後台管理</b></div><div class="muted">使用你在 Apps Script「指令碼屬性」設定的 ADMIN_CODE（管理密碼）登入' + (V.demo ? '（預覽版：這個頁面已用管理權限登入）' : '') + '。請勿傳給他人。</div></div></div>';
     p.innerHTML = h;
     p.querySelectorAll('[data-copy]').forEach(function (b) { b.onclick = function () { (navigator.clipboard ? navigator.clipboard.writeText(b.dataset.copy) : Promise.reject()).then(function () { V.toast('已複製連結'); }, function () { prompt('請手動複製：', b.dataset.copy); }); }; });
     p.querySelectorAll('[data-regen]').forEach(function (b) { b.onclick = function () {
-      V.confirm('重新產生「' + (b.dataset.regen === 'staff' ? '工作人員共用碼' : '總召專用碼') + '」？舊碼與舊連結會立即失效，' + (b.dataset.regen === 'staff' ? '所有工作人員的手機都需要重新輸入新碼。' : '總召需要用新碼重新登入。'), '重新產生', true).then(function (ok) { if (ok) admin('codes.regen', {roles: [b.dataset.regen]}).then(function (r) { draw(r.codes); }).catch(err); });
+      V.confirm('重新產生「工作人員共用碼」？舊碼與舊連結會立即失效，所有工作人員（含總召）的手機都需要重新輸入新碼。', '重新產生', true).then(function (ok) { if (ok) admin('codes.regen', {roles: ['staff']}).then(function (r) { draw(r.codes); }).catch(err); });
     }; });
   }
   admin('codes.get').then(function (r) { draw(r.codes); }).catch(err);
@@ -275,18 +276,18 @@ function paneCodes(p) {
 function drawOutStats() {}
 function rowsForExport() {
   return V.list().sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); }).map(function (r) {
-    return [r.seq && r.seq < 99999 ? r.seq : '', r.cat || '', r.org || '', r.title || '', r.name || '', r.rsvp || '', r.grp || '', r.tbl || '', r.note || '', r.tr || '', r.veh || '', r.pl || '', r.walk ? '是' : '',
-      U.fmtDT(r.pk), r.pkBy || '', U.fmtDT(r.dl), r.dlBy || '', U.fmtDT(r.ci), r.ciBy || '', U.fmtDT(r.cl), r.clBy || '', U.fmtDT(r.se), r.seBy || '', U.fmtDT(r.an), r.anBy || ''];
+    return [r.seq && r.seq < 99999 ? r.seq : '', +r.ord > 0 ? r.ord : '', r.cat || '', r.org || '', r.title || '', r.name || '', r.rsvp || '', r.grp || '', r.tbl || '', r.note || '', r.walk ? '是' : '',
+      U.fmtDT(r.ci), r.ciBy || '', U.fmtDT(r.se), r.seBy || '', U.fmtDT(r.an), r.anBy || ''];
   });
 }
-var EXPORT_HEAD = ['序', '類別', '單位名稱', '職稱', '姓名', '回覆情形', '報到組別', '桌次/座位', '備註', '接送人員', '車號', '接送地點', '現場新增', '接到時間', '接到人員', '送達時間', '送達人員', '報到時間', '報到人員', '認領時間', '認領人員', '入座時間', '入座人員', '唱名時間', '唱名人員'];
+var EXPORT_HEAD = ['序', '唱名順序', '類別', '單位名稱', '職稱', '姓名', '回覆情形', '報到組別', '桌次/座位', '備註', '現場新增', '報到時間', '報到人員', '入座時間', '入座人員', '唱名時間', '唱名人員'];
 function exportXlsx() {
   return loadXlsx().then(function () { return admin('log.get').catch(function () { return {log: []}; }); }).then(function (lg) {
     var wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet([EXPORT_HEAD].concat(rowsForExport()));
-    ws['!cols'] = EXPORT_HEAD.map(function (h, i) { return {wch: i === 2 ? 22 : i === 8 ? 24 : (i >= 13 && i % 2 === 1) ? 18 : 12}; });
+    ws['!cols'] = EXPORT_HEAD.map(function (h, i) { return {wch: i === 3 ? 22 : i === 9 ? 24 : (i >= 11 && i % 2 === 1) ? 18 : 12}; });
     XLSX.utils.book_append_sheet(wb, ws, '貴賓名單與結果');
     var all = V.list(), exp = all.filter(U.isExpected), cnt = function (f) { return all.filter(f).length; };
-    var sum = [['活動', S.ev ? S.ev.name : ''], ['日期', S.ev ? S.ev.date : ''], ['匯出時間', U.fmtDT(Date.now())], [], ['預計出席', exp.length], ['已接到', cnt(function (r) { return r.pk; })], ['已送達門口', cnt(function (r) { return r.dl; })], ['已報到', cnt(function (r) { return r.ci; })], ['  其中現場新增', cnt(function (r) { return r.walk; })], ['已入座', cnt(function (r) { return r.se; })], ['已唱名', cnt(function (r) { return r.an; })], ['未到（預計出席）', exp.filter(function (r) { return !r.ci; }).length]];
+    var sum = [['活動', S.ev ? S.ev.name : ''], ['日期', S.ev ? S.ev.date : ''], ['匯出時間', U.fmtDT(Date.now())], [], ['預計出席', exp.length], ['已報到', cnt(function (r) { return r.ci; })], ['  其中現場新增', cnt(function (r) { return r.walk; })], ['已入座', cnt(function (r) { return r.se; })], ['已唱名', cnt(function (r) { return r.an; })], ['未到（預計出席）', exp.filter(function (r) { return !r.ci; }).length]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), '統計');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['時間', '活動', '組別／角色', '人員', '裝置', '貴賓', '動作', '說明']].concat((lg.log || []).map(function (x) { x = x.slice(); if (V.ROLES[x[2]]) x[2] = V.ROLES[x[2]].name; return x; }))), '操作紀錄');
     var name = (S.ev ? S.ev.name : '活動').replace(/[\\\/:*?"<>|\s]+/g, ' ').trim().slice(0, 40) + '_報到結果_' + U.fmtDT(Date.now()).replace(/[-: ]/g, '').slice(0, 12) + '.xlsx';
@@ -306,20 +307,20 @@ function printAlpha() {
   V.printHtml(h + '</table></div>');
 }
 function paneOut(p) {
-  p.innerHTML = '<div class="pnl"><h3>📤 匯出與列印</h3><div class="outb"><button class="btn primary xl" id="ox">匯出完整結果 Excel（含各階段時間與操作紀錄）</button><button class="btn xl" id="op1">🖨 列印司儀唱名表（依序）</button><button class="btn xl" id="op2">🖨 列印桌次名單（備援）</button><button class="btn xl" id="op3">🖨 列印報到名冊（依姓名，紙本備援）</button></div><p class="muted small">建議活動當天開始前、中場、結束各匯出一次存檔。</p></div>';
+  p.innerHTML = '<div class="pnl"><h3>📤 匯出與列印</h3><div class="outb"><button class="btn primary xl" id="ox">匯出完整結果 Excel（含各階段時間與操作紀錄）</button><button class="btn xl" id="op1">🖨 列印主持人唱名順序</button><button class="btn xl" id="op2">🖨 列印桌次名單（備援）</button><button class="btn xl" id="op3">🖨 列印報到名冊（依姓名，紙本備援）</button></div><p class="muted small">建議活動當天開始前、中場、結束各匯出一次存檔。</p></div>';
   $('#ox', p).onclick = function () { exportXlsx().catch(err); };
-  $('#op1', p).onclick = function () { var c = V.list().sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); }), h = '<div id="print-area"><h2>' + esc(S.ev ? S.ev.name : '') + ' 司儀唱名表</h2><table><tr><th>序</th><th>類別</th><th>單位</th><th>職稱</th><th>姓名</th><th>桌次</th><th>唱名</th></tr>'; c.forEach(function (r) { h += '<tr><td>' + (r.seq && r.seq < 99999 ? r.seq : '') + '</td><td>' + esc(r.cat) + '</td><td>' + esc(r.org) + '</td><td>' + esc(r.title) + '</td><td><b>' + esc(r.name) + '</b></td><td>' + esc(U.tblLabel(r.tbl)) + '</td><td>☐</td></tr>'; }); V.printHtml(h + '</table></div>'); };
+  $('#op1', p).onclick = V.printOrder;
   $('#op2', p).onclick = printTables; $('#op3', p).onclick = printAlpha;
 }
 
 /* ---------- 設定 ---------- */
 function paneSet(p) {
   p.innerHTML = '<div class="pnl"><h3>🔌 連線</h3><p>模式：<b>' + (V.demo ? '預覽／示範（資料在本機瀏覽器）' : '正式（Google 試算表）') + '</b></p>' + (V.demo ? '' : '<p class="small muted" style="word-break:break-all">' + esc(V.apiUrl) + '</p>') + '<button class="btn" id="ping">測試連線</button> <span id="pingr"></span></div>' +
-    '<div class="pnl"><h3>⚠ 危險區</h3><p class="muted small">正式活動前，請先清除試用時產生的報到紀錄（名單與桌次會保留）。</p><button class="btn danger" id="reset">清除所有報到／接送紀錄</button></div>' +
+    '<div class="pnl"><h3>⚠ 危險區</h3><p class="muted small">正式活動前，請先清除試用時產生的報到紀錄（名單與桌次會保留）。</p><button class="btn danger" id="reset">清除所有報到／入座／唱名紀錄</button></div>' +
     (V.demo ? '<div class="pnl"><h3>🧪 示範資料</h3><button class="btn" id="dreset">重新產生示範資料（400 位）</button></div>' : '');
   $('#ping', p).onclick = function () { var t = Date.now(); V.api({op: 'ping'}).then(function (r) { $('#pingr', p).innerHTML = r.ok ? '<span class="okc">✓ 正常（' + (Date.now() - t) + ' ms）' + (r.ready ? '' : '，但尚未設定管理密碼') + '</span>' : '<span class="late">異常</span>'; }).catch(function () { $('#pingr', p).innerHTML = '<span class="late">無法連線</span>'; }); };
   $('#reset', p).onclick = function () {
-    var m = V.modal('<h3>清除所有報到紀錄</h3><p>這會清除所有貴賓的接到／送達／報到／帶位／入座／唱名紀錄，無法復原。請先匯出 Excel 備份。</p><label class="chk"><input type="checkbox" id="rw"> 同時移除「現場新增」的貴賓</label><p>請輸入「清除」兩字確認：</p><input class="inp" id="rc"><div class="m-btns"><button class="btn" data-close>取消</button><button class="btn danger" id="rok">確定清除</button></div>', {sticky: true});
+    var m = V.modal('<h3>清除所有報到紀錄</h3><p>這會清除所有貴賓的報到／入座／唱名紀錄，無法復原（名單、桌次與唱名順序會保留）。請先匯出 Excel 備份。</p><label class="chk"><input type="checkbox" id="rw"> 同時移除「現場新增」的貴賓</label><p>請輸入「清除」兩字確認：</p><input class="inp" id="rc"><div class="m-btns"><button class="btn" data-close>取消</button><button class="btn danger" id="rok">確定清除</button></div>', {sticky: true});
     $('#rok', m).onclick = function () { if ($('#rc', m).value.trim() !== '清除') { V.toast('請輸入「清除」', 'bad'); return; } admin('states.reset', {removeWalkins: $('#rw', m).checked}).then(function () { m.close(); V.forceResync(); V.toast('已清除'); }).catch(err); };
   };
   var d = $('#dreset', p); if (d) d.onclick = function () { V.confirm('重新產生示範資料？目前示範資料會被覆蓋。', '重新產生', true).then(function (ok) { if (ok) window.VIPDEMO.resetAll(); }); };

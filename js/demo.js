@@ -21,7 +21,6 @@ var CATS = [
   ['媒體', 20, ['中央社', '聯合報', '自由時報', '公視', '工商時報'], ['總編輯', '採訪主任', '記者']],
   ['一般來賓', 20, ['個人', '社區發展協會', '里辦公處'], ['來賓', '里長', '代表']]
 ];
-var DRIVERS = [['王師傅', 'ABC-1288', '台北車站 東三門'], ['林大哥', 'BDF-3350', '松山機場'], ['陳司機', 'KLM-6021', '高鐵台北站'], ['張師傅', 'RTA-7718', '南港展覽館'], ['李司機', 'NCC-9005', '台北車站 東三門']];
 function genRows(seed) {
   var R = rng(seed), rows = [], n = 0, rsvps = ['回覆出席', '回覆出席', '回覆出席', '回覆出席', '回覆出席', '回覆出席', '回覆出席', '未回覆', '未回覆', '請假', '代理出席'];
   var used = {};
@@ -29,10 +28,9 @@ function genRows(seed) {
     for (var i = 0; i < c[1]; i++) {
       n++;
       var name; do { name = SUR[Math.floor(R() * SUR.length)] + GIV[Math.floor(R() * GIV.length)]; } while (used[name]); used[name] = 1;
-      var rs = rsvps[Math.floor(R() * rsvps.length)], tr = R() < 0.24 && rs !== '請假', d = DRIVERS[Math.floor(R() * DRIVERS.length)];
+      var rs = rsvps[Math.floor(R() * rsvps.length)];
       rows.push({seq: n, cat: c[0], org: c[2][Math.floor(R() * c[2].length)] + (R() < .4 ? ['辦公室', '股份有限公司', '秘書處'][Math.floor(R() * 3)] : ''), title: c[3][Math.floor(R() * c[3].length)], name: name, rsvp: rs,
-        grp: ['A組', 'B組', 'C組'][Math.floor(R() * 3)], tbl: String(Math.floor((n - 1) / 10) + 1), note: rs === '代理出席' ? '代理人：' + SUR[Math.floor(R() * 40)] + '先生' : (R() < .04 ? '素食' : (R() < .03 ? '需無障礙座位' : '')),
-        tr: tr ? d[0] : '', veh: tr ? d[1] : '', pl: tr ? d[2] : ''});
+        grp: ['A組', 'B組', 'C組'][Math.floor(R() * 3)], tbl: String(Math.floor((n - 1) / 10) + 1), note: rs === '代理出席' ? '代理人：' + SUR[Math.floor(R() * 40)] + '先生' : (R() < .04 ? '素食' : (R() < .03 ? '需無障礙座位' : ''))});
     }
   });
   return rows;
@@ -46,30 +44,27 @@ function seedBase() {
 }
 function seedLive(info) {
   var R = rng(77), all = call({op: 'sync', code: 'admin', ev: info.ev, since: 0}).recs, min = 60000;
-  var codes = info.codes, per = {transport: {}, checkin: {}, reception: {}, stage: {}};
-  var staff = {transport: ['王師傅', '林大哥', '陳司機'], checkin: ['小美', '小華', '阿傑'], reception: ['接待1號', '接待2號', '接待3號'], stage: ['司儀小林']};
+  var codes = info.codes, per = {checkin: {}, reception: {}, stage: {}};
+  var staff = {checkin: ['小美', '小華', '阿傑'], reception: ['接待1號', '接待2號', '接待3號'], stage: ['司儀小林']};
   function push(role, a) { var s = staff[role][Math.floor(R() * staff[role].length)]; (per[role][s] = per[role][s] || []).push(a); }
   var exp = all.filter(function (r) { return r.rsvp !== '請假'; });
+  /* 主持人唱名順序：前 70 位（依名單序）排入順序 */
+  var ordIds = exp.slice().sort(function (a, b) { return a.seq - b.seq; }).slice(0, 70), rank = {};
+  ordIds.forEach(function (r, i) { rank[r.id] = i + 1; });
+  call({op: 'ord', code: 'admin', ev: info.ev, cmd: 'set', list: ordIds.map(function (r, i) { return [r.id, i + 1]; }), staff: '慶哥'});
   exp.sort(function () { return R() - .5; });
-  var nci = Math.round(exp.length * .55), arrivedList = exp.slice(0, nci), rest = exp.slice(nci), ciAge = {};
-  arrivedList.forEach(function (r, i) {
-    var age = (1 + R() * 74) * min;
-    ciAge[r.id] = age;
-    if (r.tr) { var dlAge = age + (2 + R() * 8) * min, pkAge = dlAge + (8 + R() * 18) * min; push('transport', {a: 'st', g: r.id, s: 'pk', on: 1, age: pkAge, cid: 'sp' + r.id}); push('transport', {a: 'st', g: r.id, s: 'dl', on: 1, age: dlAge, cid: 'sd' + r.id}); }
-    push('checkin', {a: 'st', g: r.id, s: 'ci', on: 1, age: age, cid: 'sc' + r.id});
-  });
-  var tr = rest.filter(function (r) { return r.tr; });
-  tr.slice(0, 7).forEach(function (r) { push('transport', {a: 'st', g: r.id, s: 'pk', on: 1, age: (2 + R() * 10) * min, cid: 'sp' + r.id}); });
-  tr.slice(7, 12).forEach(function (r) { var d = (.5 + R() * 3) * min; push('transport', {a: 'st', g: r.id, s: 'pk', on: 1, age: d + 12 * min, cid: 'sp' + r.id}); push('transport', {a: 'st', g: r.id, s: 'dl', on: 1, age: d, cid: 'sd' + r.id}); });
+  var nci = Math.round(exp.length * .55), arrivedList = exp.slice(0, nci), ciAge = {}, inA = {};
+  arrivedList.forEach(function (r) { inA[r.id] = 1; ciAge[r.id] = (1 + R() * 74) * min; });
+  ordIds.slice(0, 30).forEach(function (r) { if (!inA[r.id]) { arrivedList.push(r); inA[r.id] = 1; ciAge[r.id] = (30 + R() * 40) * min; } });
+  arrivedList.forEach(function (r) { push('checkin', {a: 'st', g: r.id, s: 'ci', on: 1, age: ciAge[r.id], cid: 'sc' + r.id}); });
   var seatedIds = [];
   arrivedList.sort(function (a, b) { return ciAge[b.id] - ciAge[a.id]; }).forEach(function (r) {
-    var age = ciAge[r.id];
-    if (age > 12 * min || (age > 3 * min && R() < .6)) { var sa = Math.max(0.2 * min, age - (1 + R() * 4) * min); push('reception', {a: 'st', g: r.id, s: 'cl', on: 1, age: sa + 30000, cid: 'sl' + r.id}); push('reception', {a: 'st', g: r.id, s: 'se', on: 1, age: sa, cid: 'ss' + r.id}); seatedIds.push([r, sa]); }
-    else if (age < 4 * min && R() < .5) push('reception', {a: 'st', g: r.id, s: 'cl', on: 1, age: age - 20000 > 0 ? age - 20000 : 1000, cid: 'sl' + r.id});
+    var age = ciAge[r.id], rk = rank[r.id] || 999;
+    if (rk <= 14 || age > 12 * min || (age > 3 * min && R() < .6)) { var sa = Math.max(0.2 * min, age - (1 + R() * 4) * min); push('reception', {a: 'st', g: r.id, s: 'se', on: 1, age: sa, cid: 'ss' + r.id}); seatedIds.push([r, sa]); }
   });
-  seatedIds.forEach(function (x) { if (x[0].seq <= 100 && R() < .85) push('stage', {a: 'st', g: x[0].id, s: 'an', on: 1, age: Math.max(1000, x[1] - 60000), cid: 'sa' + x[0].id}); });
+  seatedIds.forEach(function (x) { if ((rank[x[0].id] || 999) <= 8) push('stage', {a: 'st', g: x[0].id, s: 'an', on: 1, age: Math.max(1000, x[1] - 60000), cid: 'sa' + x[0].id}); });
   ['現場貴賓甲', '現場貴賓乙', '臨時來賓丙'].forEach(function (nm, i) { push('checkin', {a: 'walkin', g: 'w' + (1000 + i) + 'seed', f: {name: nm, org: '臨時報到', title: '來賓', cat: '一般來賓', tbl: String(41 + i)}, age: (3 + i * 7) * min, cid: 'sw' + i}); });
-  ['transport', 'checkin', 'reception', 'stage'].forEach(function (role) {
+  ['checkin', 'reception', 'stage'].forEach(function (role) {
     Object.keys(per[role]).forEach(function (st) {
       var acts = per[role][st];
       for (var i = 0; i < acts.length; i += 40) call({op: 'sync', code: codes.staff, sg: role, ev: info.ev, since: 0, staff: st, dev: 'demo', acts: acts.slice(i, i + 40).map(function (a) { a.gr = role; return a; })});
@@ -85,7 +80,7 @@ window.VIPDEMO = {
     if (new URLSearchParams(location.search).get('demo') === 'reset') { seed('live'); history.replaceState(null, '', location.pathname); }
     var r = call({op: 'login', code: 'admin'});
     if (!r.ok || !r.events || !r.events.length) seed('live');
-    window.VIP.defaultName = function () { return {transport: '王師傅', checkin: '小美', reception: '接待1號', stage: '司儀小林', director: '總召', admin: '慶哥'}[window.VIP.S.role === 'staff' ? window.VIP.S.grp : window.VIP.S.role] || ''; };
+    window.VIP.defaultName = function () { return {checkin: '小美', reception: '接待1號', stage: '司儀小林', director: '總召', admin: '慶哥'}[window.VIP.S.role === 'staff' ? window.VIP.S.grp : window.VIP.S.role] || ''; };
     return Promise.resolve();
   },
   resetAll: function (scn) {
@@ -94,10 +89,10 @@ window.VIPDEMO = {
   },
   launcher: function (el, tools, enter) {
     var r = call({op: 'login', code: 'admin'}), ev = r.events[0], codes = call({op: 'admin', code: 'admin', ev: ev.id, cmd: 'codes.get'}).codes;
-    var items = [['transport', '🚐 交通組'], ['checkin', '✅ 報到組'], ['reception', '🤝 接待組'], ['stage', '🎤 舞台組（司儀）'], ['director', '📊 活動總召（專用碼）'], ['admin', '⚙️ 後台管理']];
-    var h = '<div class="muted small demo-code">工作人員「共用存取碼」：<b id="demo-staffcode">' + codes.staff + '</b>　（四個組別都用這一組，登入後再選組別）<br>總召專用碼：<b>' + codes.director + '</b>　後台密碼：<b>admin</b>（僅示範用）</div>';
+    var items = [['checkin', '✅ 報到組'], ['reception', '🪑 接待組'], ['stage', '🎤 舞台組（主持人）'], ['director', '📊 總召（唯讀）'], ['admin', '⚙️ 後台管理']];
+    var h = '<div class="muted small demo-code">工作人員「共用存取碼」：<b id="demo-staffcode">' + codes.staff + '</b>　（報到、接待、舞台、總召都用這一組，登入後在上方分頁切換）<br>後台密碼：<b>admin</b>（僅示範用）</div>';
     h += items.map(function (x) {
-      var g = ['transport', 'checkin', 'reception', 'stage'].indexOf(x[0]) >= 0, c = x[0] === 'admin' ? 'admin' : g ? codes.staff : codes[x[0]];
+      var g = x[0] !== 'admin', c = x[0] === 'admin' ? 'admin' : codes.staff;
       return '<div class="dl"><button class="btn primary" data-go="' + c + '"' + (g ? ' data-grp="' + x[0] + '"' : '') + '>' + x[1] + '</button><a class="btn sm" target="_blank" href="?c=' + encodeURIComponent(c) + (g ? '#' + x[0] : '') + '">新分頁</a></div>';
     }).join('');
     el.innerHTML = h;

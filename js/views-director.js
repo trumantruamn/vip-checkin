@@ -1,4 +1,4 @@
-/* 活動總召：唯讀即時儀表板 */
+/* 總召：唯讀即時儀表板（與報到／接待／舞台同一個介面，用共用存取碼進入） */
 (function () {
 'use strict';
 var V = window.VIP, S = V.S, U = V.u, esc = U.esc, T = U.fmtT;
@@ -12,17 +12,13 @@ function bar(a, b, cls) { var p = Math.min(100, pct(a, b)); return '<div class="
 function compute() {
   var all = V.list(), exp = all.filter(U.isExpected), c = {};
   c.all = all; c.exp = exp.length;
-  c.trNeed = exp.filter(U.isTr).length;
-  c.onway = all.filter(function (r) { return r.pk && !r.dl && !r.ci; }).length;
-  c.pk = all.filter(function (r) { return r.pk; }).length;
-  c.dl = all.filter(function (r) { return r.dl; }).length;
   c.ci = all.filter(function (r) { return r.ci; }).length;
   c.se = all.filter(function (r) { return r.se; }).length;
   c.an = all.filter(function (r) { return r.an; }).length;
   c.walk = all.filter(function (r) { return r.walk; }).length;
   c.absent = exp.filter(function (r) { return !r.ci; });
   c.waitSeat = all.filter(function (r) { return r.ci && !r.se; }).length;
-  c.trTotal = all.filter(U.isTr).length;
+  c.ord = all.filter(function (r) { return +r.ord > 0; });
   return c;
 }
 function tile(label, n, of, cls, sub) {
@@ -69,16 +65,15 @@ function tableGrid(c) {
   var un = c.all.filter(function (r) { return !r.tbl; }).length;
   return h + '</div>' + (un ? '<div class="muted small">另有 ' + un + ' 位尚未排桌次</div>' : '');
 }
-var STEPS = [['pk', '接到'], ['dl', '送達'], ['ci', '報到'], ['cl', '帶領'], ['se', '入座'], ['an', '唱名']];
+var STEPS = [['ci', '報到'], ['se', '入座'], ['an', '唱名']];
 function stepsHtml(r) {
   return '<div class="ag-steps">' + STEPS.map(function (x) {
     var k = x[0], t = r[k];
     if (t) return '<div class="stp on"><span class="sl">' + x[1] + '</span><span class="stt">' + T(t) + '</span><span class="sb">' + esc(r[k + 'By'] || '') + '</span></div>';
-    var na = (k === 'pk' || k === 'dl') && !U.isTr(r);
-    return '<div class="stp' + (na ? ' na' : '') + '"><span class="sl">' + x[1] + '</span><span class="stt">' + (na ? '無接送' : '—') + '</span><span class="sb"></span></div>';
+    return '<div class="stp"><span class="sl">' + x[1] + '</span><span class="stt">—</span><span class="sb"></span></div>';
   }).join('') + '</div>';
 }
-var SL = {none: '尚未開始', pk: '接送中', dl: '已到門口', ci: '已報到', cl: '帶領中', se: '已入座', an: '已唱名'};
+var SL = {none: '尚未報到', ci: '已報到・待入座', se: '已入座', an: '已唱名'};
 function guestRow(r) {
   var k = U.stageKey(r) || 'none', tg = '';
   if (r.cat) tg += '<span class="tag">' + esc(r.cat) + '</span>';
@@ -86,7 +81,7 @@ function guestRow(r) {
   if (r.walk) tg += '<span class="tag walk">現場新增</span>';
   if (r.rsvp === '代理出席') tg += '<span class="tag warn">代理出席</span>';
   return '<div class="card ag s-' + k + '" data-id="' + r.id + '"><div class="ag-h">' + (r.seq && r.seq < 99999 ? '<span class="seq">' + r.seq + '</span>' : '<span class="seq new">新</span>') + '<div class="ag-n"><b>' + esc(r.name) + '</b><span class="ag-sub">' + esc(U.addrName(r)) + '</span></div><span class="ag-st s-' + k + '">' + SL[k] + '</span></div>' +
-    '<div class="g-meta">' + tg + (r.tr ? '<span class="tag">🚐 ' + esc(r.tr) + '</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
+    '<div class="g-meta">' + tg + (+r.ord > 0 ? '<span class="tag">唱名第 ' + r.ord + ' 順位</span>' : '') + (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div>' + stepsHtml(r) + '</div>';
 }
 function tableDetail(c) {
   var g = c.all.filter(function (r) { return String(r.tbl || '') === selT; }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999) || String(a.name).localeCompare(String(b.name)); });
@@ -107,30 +102,43 @@ function absentList(c) {
   var arr = c.absent.filter(function (r) { return (!nCat || r.cat === nCat) && U.matches(r, q); }).sort(function (a, b) { return (a.seq || 99999) - (b.seq || 99999); });
   var h = '<div class="muted small">未到 ' + c.absent.length + ' 位' + (arr.length !== c.absent.length ? '，符合 ' + arr.length + ' 位' : '') + '</div><div class="alist">';
   arr.slice(0, 80).forEach(function (r) {
-    var s = r.dl ? '<span class="tag hot">已到門口</span>' : r.pk ? '<span class="tag hot2">接送中</span>' : U.isTr(r) ? '<span class="tag">待接送</span>' : '';
+    var s = '';
     h += '<div class="ar"><span class="seq">' + (r.seq || '') + '</span><div class="ar-m"><b>' + esc(r.name) + '</b> <span class="muted">' + esc(U.addrName(r)) + '</span></div>' + s + (r.rsvp && r.rsvp !== '回覆出席' ? '<span class="tag warn">' + esc(r.rsvp) + '</span>' : '') + '</div>';
   });
   if (arr.length > 80) h += '<div class="more-note">還有 ' + (arr.length - 80) + ' 位，請用搜尋縮小</div>';
   return h + '</div>';
 }
 function feed(c) {
-  var ev = [], lab = {pk: '接到', dl: '送達門口', ci: '報到', cl: '認領帶位', se: '入座', an: '唱名'};
-  c.all.forEach(function (r) { ['pk', 'dl', 'ci', 'cl', 'se', 'an'].forEach(function (s) { if (r[s]) ev.push({t: r[s], s: s, who: r[s + 'By'], n: r.name, tb: r.tbl}); }); });
+  var ev = [], lab = {ci: '報到', se: '已入座', an: '唱名'};
+  c.all.forEach(function (r) { ['ci', 'se', 'an'].forEach(function (s) { if (r[s]) ev.push({t: r[s], s: s, who: r[s + 'By'], n: r.name, tb: r.tbl}); }); });
   ev.sort(function (a, b) { return b.t - a.t; });
   var h = '<div class="feed">';
   ev.slice(0, 40).forEach(function (e) { h += '<div class="fe"><span class="ft">' + T(e.t) + '</span><span class="tag s-' + e.s + '">' + V.ROLES[V.STAGES[e.s].role].name + '</span> <b>' + esc(e.who || '?') + '</b> ' + lab[e.s] + ' <b>' + esc(e.n) + '</b>' + (e.s === 'ci' && e.tb ? ' → ' + esc(U.tblLabel(e.tb)) : '') + '</div>'; });
   return h + (ev.length ? '' : '<div class="empty">尚無動態</div>') + '</div>';
 }
+function seatedPanel(c) {
+  var arr = c.all.filter(function (r) { return r.se; }).sort(function (a, b) { return b.se - a.se; });
+  var h = '<div class="muted small">已入座 ' + arr.length + ' 位（最新在上）' + (c.waitSeat ? '・已報到待入座 ' + c.waitSeat + ' 位' : '') + '</div><div class="alist">';
+  arr.slice(0, 15).forEach(function (r) { h += '<div class="ar"><span class="ft">' + T(r.se) + '</span><div class="ar-m"><b>' + esc(r.name) + '</b> <span class="muted">' + esc(U.addrName(r)) + '</span></div><span class="tbl-badge sm">' + esc(U.tblLabel(r.tbl) || '未排桌') + '</span>' + (r.an ? '<span class="tag s-an">已唱名</span>' : '') + '<span class="muted small">' + esc(r.seBy || '') + '</span></div>'; });
+  return h + (arr.length ? '' : '<div class="empty">尚無人入座</div>') + '</div>';
+}
+function nextPanel(c) {
+  var o = c.ord.slice().sort(function (a, b) { return a.ord - b.ord; }), todo = o.filter(function (r) { return !r.an; });
+  if (!o.length) return '<div class="empty">尚未設定唱名順序（由舞台組或管理員設定）</div>';
+  var h = '<div class="muted small">已唱名 ' + (o.length - todo.length) + ' / ' + o.length + ' 位' + (o.length - todo.length ? '・最近一位：' + esc(o.filter(function (r) { return r.an; }).sort(function (a, b) { return b.an - a.an; })[0].name) : '') + '</div><div class="alist">';
+  todo.slice(0, 6).forEach(function (r) { h += '<div class="ar"><span class="seq">' + r.ord + '</span><div class="ar-m"><b>' + esc(r.name) + '</b> <span class="muted">' + esc(U.addrName(r)) + '</span></div>' + V.statusChip(r) + '</div>'; });
+  return h + (todo.length ? '' : '<div class="empty">🎉 全部唱名完畢</div>') + '</div>';
+}
 function staffTable(c) {
-  var roles = {transport: {}, checkin: {}, reception: {}, stage: {}};
+  var roles = {checkin: {}, reception: {}, stage: {}};
   c.all.forEach(function (r) {
-    ['pk', 'dl', 'ci', 'cl', 'se', 'an'].forEach(function (s) {
+    ['ci', 'se', 'an'].forEach(function (s) {
       if (!r[s]) return; var role = V.STAGES[s].role, who = r[s + 'By'] || '?', x = roles[role][who] || (roles[role][who] = {n: 0, last: 0});
       x.n++; if (r[s] > x.last) x.last = r[s];
     });
   });
   var h = '<table class="tbl"><tr><th>組別</th><th>人員</th><th>處理筆數</th><th>最後動作</th></tr>';
-  ['transport', 'checkin', 'reception', 'stage'].forEach(function (role) {
+  ['checkin', 'reception', 'stage'].forEach(function (role) {
     var ks = Object.keys(roles[role]).sort(function (a, b) { return roles[role][b].last - roles[role][a].last; });
     if (!ks.length) h += '<tr><td>' + V.ROLES[role].icon + ' ' + V.ROLES[role].name + '</td><td colspan="3" class="muted">尚無動作</td></tr>';
     ks.forEach(function (k, i) { var x = roles[role][k]; var idle = Date.now() - x.last; h += '<tr><td>' + (i ? '' : V.ROLES[role].icon + ' ' + V.ROLES[role].name) + '</td><td>' + esc(k) + '</td><td>' + x.n + '</td><td class="' + (idle < 300000 ? 'okc' : '') + '">' + T(x.last) + '・' + U.ago(x.last) + '</td></tr>'; });
@@ -142,6 +150,8 @@ V.views.director = {
   mount: function (r) {
     root = r;
     r.innerHTML = '<div class="dash"><h2 class="ev-title" id="evt"></h2><div id="kpis" class="kpis"></div>' +
+      '<section class="pnl"><h3>🪑 最新入座名單 <span class="muted small">（接待組回報）</span></h3><div id="seated"></div></section>' +
+      '<section class="pnl"><h3>🎤 唱名進度 <span class="muted small">（主持人）</span></h3><div id="nextan"></div></section>' +
       '<section class="pnl"><h3>📈 報到趨勢</h3><div id="trend"></div></section>' +
       '<section class="pnl"><h3>🗂 各類別進度</h3><div id="cats"></div></section>' +
       '<section class="pnl wide"><h3>🪑 各桌狀況 <span class="muted small">（入座／應到，下方淺色條＝已報到）</span></h3><div id="tables"></div></section>' +
@@ -170,13 +180,13 @@ V.views.director = {
     if (!root) return;
     var c = compute();
     $('#kpis', root).innerHTML =
-      tile('預計出席', c.exp, null, 'k0', (c.trNeed ? '需接送 ' + c.trNeed + ' 人' : '') + (c.walk ? '・現場新增 ' + c.walk : '')) +
-      tile('接送中', c.onway, c.trTotal || null, 'k1', '已接到未送達') +
-      tile('已送達門口', c.dl, c.trTotal || null, 'k2', '佔需接送人數') +
+      tile('預計出席', c.exp, null, 'k0', c.walk ? '現場新增 ' + c.walk : '') +
       tile('已報到', c.ci, c.exp, 'k3', '含現場新增') +
-      tile('已入座', c.se, c.exp, 'k4', c.waitSeat ? '等待帶位 ' + c.waitSeat : '') +
-      tile('已唱名', c.an, c.exp, 'k5', '') +
+      tile('已入座', c.se, c.exp, 'k4', c.waitSeat ? '已報到、待入座 ' + c.waitSeat : '') +
+      tile('已唱名', c.an, c.ord.length || c.exp, 'k5', c.ord.length ? '佔唱名順序 ' + c.ord.length + ' 位' : '尚未設定唱名順序') +
       tile('未到', c.absent.length, c.exp, 'k6', '預計出席尚未報到');
+    $('#seated', root).innerHTML = seatedPanel(c);
+    $('#nextan', root).innerHTML = nextPanel(c);
     $('#trend', root).innerHTML = trend(c);
     $('#cats', root).innerHTML = catTable(c);
     $('#tables', root).innerHTML = tableGrid(c);

@@ -27,20 +27,19 @@ function lsDel(k) { try { LS.removeItem(k); } catch (e) {} }
 
 /* ---------- 工具 ---------- */
 var ROLES = {
-  transport: {name: '交通組', icon: '🚐', desc: '接送貴賓'},
   checkin: {name: '報到組', icon: '✅', desc: '報到櫃檯'},
-  reception: {name: '接待組', icon: '🤝', desc: '引導入座'},
-  stage: {name: '舞台組', icon: '🎤', desc: '司儀唱名'},
+  reception: {name: '接待組', icon: '🪑', desc: '看桌面・按已入座'},
+  stage: {name: '舞台組', icon: '🎤', desc: '主持人唱名'},
   director: {name: '活動總召', icon: '📊', desc: '即時總覽（唯讀）'},
   admin: {name: '後台管理', icon: '⚙️', desc: '名單與設定'}
 };
 var STAGES = {
-  pk: {label: '已接到', role: 'transport'}, dl: {label: '已送達門口', role: 'transport'},
-  ci: {label: '已報到', role: 'checkin'}, cl: {label: '帶領中', role: 'reception'},
+  ci: {label: '已報到', role: 'checkin'},
   se: {label: '已入座', role: 'reception'}, an: {label: '已唱名', role: 'stage'}
 };
-var GROUPS = ['transport', 'checkin', 'reception', 'stage'];
-V.ROLES = ROLES; V.STAGES = STAGES; V.GROUPS = GROUPS;
+var GROUPS = ['checkin', 'reception', 'stage', 'director'];   // 同一個畫面的分頁（總召＝唯讀總覽）
+var ACT_GROUPS = ['checkin', 'reception', 'stage'];          // 有「我的工作」可操作的組別
+V.ROLES = ROLES; V.STAGES = STAGES; V.GROUPS = GROUPS; V.ACT_GROUPS = ACT_GROUPS;
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
 var tfmt = new Intl.DateTimeFormat('zh-TW', {timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false});
 var tfmtS = new Intl.DateTimeFormat('zh-TW', {timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
@@ -74,7 +73,7 @@ function matches(r, q) {
 }
 function isTr(r) { return !!(r.tr || r.veh || r.pl); }
 function isExpected(r) { return !r.walk && r.rsvp !== '請假'; }
-function stageKey(r) { return r.an ? 'an' : r.se ? 'se' : r.cl ? 'cl' : r.ci ? 'ci' : r.dl ? 'dl' : r.pk ? 'pk' : ''; }
+function stageKey(r) { return r.an ? 'an' : r.se ? 'se' : r.ci ? 'ci' : ''; }
 function addrName(r) { return [r.org, r.title].filter(Boolean).join(' '); }
 V.u = {esc: esc, fmtT: fmtT, fmtTS: fmtTS, fmtDT: fmtDT, ago: ago, waitMin: waitMin, tblLabel: tblLabel, tblNum: tblNum, uid: uid, matches: matches, isTr: isTr, isExpected: isExpected, stageKey: stageKey, addrName: addrName, norm: norm, lsGet: lsGet, lsSet: lsSet, lsDel: lsDel};
 
@@ -116,7 +115,7 @@ function applyLocal(rec, act) {
   var t = act.t;
   if (act.a === 'st') {
     var by = act.s + 'By';
-    if (act.on) { if (!rec[act.s]) { rec[act.s] = t; rec[by] = S.staff; } }
+    if (act.on) { if (!rec[act.s]) { if (act.s === 'se' && !rec.ci && act.fc) { rec.ci = t; rec.ciBy = S.staff; } rec[act.s] = t; rec[by] = S.staff; } }
     else { delete rec[act.s]; delete rec[by]; }
   } else if (act.a === 'edit') {
     for (var k in act.f) { var v = act.f[k]; if (v === '' || v === 0 || v == null) delete rec[k]; else rec[k] = v; }
@@ -172,7 +171,41 @@ V.act = function (act) {
   S.pending.push(act); listCache = null; persist(); notify(); kick(60);
   return act.cid;
 };
-V.stage = function (id, s, on) { return V.act({a: 'st', g: id, s: s, on: on ? 1 : 0}); };
+V.stage = function (id, s, on, fc) { var a = {a: 'st', g: id, s: s, on: on ? 1 : 0}; if (fc) a.fc = 1; return V.act(a); };
+
+/* 唱名順序：舞台組／後台直接呼叫伺服器（依序執行，不進離線佇列）；先在本機樂觀更新，失敗就重新同步 */
+function mergeRecs(recs) {
+  (recs || []).forEach(function (x) {
+    if (x.hide || x.del) delete S.base[x.id]; else { var o = S.base[x.id]; if (!o || (x.u || 0) >= (o.u || 0)) S.base[x.id] = x; }
+  });
+  listCache = null; persist(); notify();
+}
+var ordQ = Promise.resolve();
+V.ordApi = function (body) {
+  var p = ordQ.then(function () {
+    return api(Object.assign({op: 'ord', code: S.code, ev: S.evId, sg: S.role === 'staff' ? S.grp : undefined, staff: S.staff, dev: S.dev}, body));
+  }).then(function (r) {
+    if (r && r.ok) mergeRecs(r.recs);
+    else { toast((r && r.msg) || '順序儲存失敗', 'bad'); V.forceResync(); }
+    return r;
+  }, function () { toast('網路不穩，順序沒有儲存成功，請稍後再試', 'bad'); V.forceResync(); return {ok: false}; });
+  ordQ = p.catch(function () {});
+  return p;
+};
+V.setOrder = function (pairs) {   // pairs: [[id, 順序]]，順序 0＝取消
+  var any = false;
+  pairs.forEach(function (x) { var r = S.base[x[0]]; if (!r) return; if ((+r.ord || 0) === (+x[1] || 0)) return; any = true; if (+x[1] > 0) r.ord = +x[1]; else delete r.ord; });
+  if (!any) return Promise.resolve({ok: true, changed: 0});
+  listCache = null; notify();
+  return V.ordApi({cmd: 'set', list: pairs});
+};
+V.orderedList = function () {   // 已排順序的貴賓（依順序），與尚未排的貴賓（依序號）
+  var all = V.list(), a = [], b = [];
+  all.forEach(function (r) { if (+r.ord > 0) a.push(r); else b.push(r); });
+  a.sort(function (x, y) { return x.ord - y.ord || (x.seq || 99999) - (y.seq || 99999); });
+  b.sort(function (x, y) { return (x.seq || 99999) - (y.seq || 99999); });
+  return {ordered: a, rest: b};
+};
 
 var timer = null, busy = false, fails = 0, forceNext = false, lastForce = Date.now();
 function kick(ms) { clearTimeout(timer); timer = setTimeout(cycle, ms == null ? 0 : ms); }
@@ -191,7 +224,7 @@ function cycle() {
   var sent = S.pending.slice(0, 30), now = Date.now();
   var force = forceNext || (now - lastForce > 60000);
   var body = {op: 'sync', code: S.code, ev: S.evId, since: S.ver, epoch: S.epoch, mv: S.mv, have: S.have, staff: S.staff, dev: S.dev, force: force, sg: S.role === 'staff' ? S.grp : undefined,
-    acts: sent.map(function (a) { return {cid: a.cid, a: a.a, g: a.g, s: a.s, on: a.on, f: a.f, gr: a.gr, age: now - a.t}; })};
+    acts: sent.map(function (a) { return {cid: a.cid, a: a.a, g: a.g, s: a.s, on: a.on, f: a.f, fc: a.fc, gr: a.gr, age: now - a.t}; })};
   if (!sent.length) delete body.acts;
   api(body).then(function (r) {
     busy = false;
@@ -345,7 +378,7 @@ V.setGroup = function (g) {
 function groupPicker(done) {
   var app = document.getElementById('app'), nm = S.ev ? S.ev.name : evNameKnown();
   var h = '<div class="login"><div class="login-card"><div class="login-brand">' + (BRAND.logoV ? '<img class="login-logo" src="' + esc(BRAND.logoV) + '" alt="' + esc(BRAND.name + ' ' + BRAND.en) + '">' : '') + '<div class="logo">' + esc(BRAND.appName) + '</div>' + (nm ? '<div class="login-ev" id="pk-ev">' + esc(nm) + '</div>' : '') + '</div>' +
-    '<h3 class="pk-title">請選擇你的組別</h3><p class="muted pk-sub">登入後隨時可以在上方切換組別。每一組只能操作自己負責的步驟，其他組的進度都看得到。</p><div class="pk-grid" id="pk-grid">' +
+    '<h3 class="pk-title">請選擇你的組別</h3><p class="muted pk-sub">報到、接待、舞台與總召都在同一個畫面，登入後隨時可以在上方分頁切換。每一組只能操作自己負責的步驟，其他組的進度都看得到；總召為唯讀。</p><div class="pk-grid" id="pk-grid">' +
     GROUPS.map(function (k) { return '<button class="pk-btn" data-grp="' + k + '"><span class="pk-i">' + ROLES[k].icon + '</span><span class="pk-n">' + ROLES[k].name + '</span><span class="pk-d">' + ROLES[k].desc + '</span></button>'; }).join('') +
     '</div><button class="btn link" id="pk-out">登出／換存取碼</button></div>' + brandFoot() + '</div>';
   app.innerHTML = h;
@@ -376,7 +409,7 @@ function menu() {
   }
   if (S.role === 'admin') {
     h += '<div class="muted small" style="margin-top:8px">切換到各組畫面（管理員可代為操作）：</div><div class="chips">';
-    ['admin', 'transport', 'checkin', 'reception', 'stage', 'director'].forEach(function (k) { h += '<button class="chip' + ((V.viewRole || S.role) === k ? ' on' : '') + '" data-view="' + k + '">' + ROLES[k].icon + ' ' + ROLES[k].name + '</button>'; });
+    ['admin', 'checkin', 'reception', 'stage', 'director'].forEach(function (k) { h += '<button class="chip' + ((V.viewRole || S.role) === k ? ' on' : '') + '" data-view="' + k + '">' + ROLES[k].icon + ' ' + ROLES[k].name + '</button>'; });
     h += '</div>';
   }
   h += '<button class="btn danger" id="mn-out">登出</button></div><div class="m-btns"><button class="btn" data-close>關閉</button></div>';
@@ -392,7 +425,7 @@ V.panel = 'mine';
 function showView(role, panel) {
   if (curView && curView.unmount) curView.unmount();
   if (curUnsub) curUnsub();
-  var isGrp = GROUPS.indexOf(role) >= 0;
+  var isGrp = ACT_GROUPS.indexOf(role) >= 0;
   if (panel) V.panel = panel;
   if (!isGrp) V.panel = 'mine';
   V.viewRole = role; updateHeader();
