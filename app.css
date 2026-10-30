@@ -239,7 +239,7 @@ body.td-open{overflow:hidden}
 .rc-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:8px 0}
 .rc-head .rc-title{flex:1;min-width:140px}.rc-title h3{margin:0 0 2px;font-size:1.35em}
 .rc2.seated{background:#f3faf6;border-color:#a9dcbc}.rc2.notyet{background:#fafafa}
-.rc2 .g-act .btn.xl{min-width:104px}.rc2 .g-act .btn small{display:block;font-size:.72em;font-weight:500;opacity:.85}
+.rc2 .g-act .btn.xl{min-width:112px}.rc2 .g-act .seat-go{min-height:52px;font-size:1.05em;box-shadow:0 2px 6px rgba(31,111,107,.35)}.seat-done{display:inline-block;border:1.5px solid #6fbf8f;background:#fff;color:#2f7d4f;border-radius:10px;padding:7px 11px;font-weight:700;font-size:.92em;white-space:nowrap}.rc2 .g-act .btn small{display:block;font-size:.72em;font-weight:500;opacity:.85}
 .next-card{background:linear-gradient(135deg,#e9f5f3,#fff);border:2px solid var(--teal);border-radius:18px;padding:14px 16px;margin:8px 0;text-align:center}
 .next-card:empty{display:none}
 .nx-l{font-weight:700;color:var(--brand);margin-bottom:2px}.nx-org{font-size:1.15em;color:#33434f}.nx-name{font-size:2.4em;font-weight:900;line-height:1.15;color:#0b1f2a;margin:2px 0}.nx-s{margin:4px 0 10px}

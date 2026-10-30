@@ -136,7 +136,7 @@ V.printOrder = function () {
   V.printHtml(h + '</table></div>');
 };
 
-/* ================== 接待組：看著現場桌面，直接按「已入座」 ================== */
+/* ================== 接待組：看著現場桌面，直接按「確認入座」 ================== */
 (function () {
   var st = {t: null, q: ''};
   var root;
@@ -146,12 +146,13 @@ V.printOrder = function () {
     var w = r.ci && !r.se ? U.waitMin(r.ci) : 0;
     var h = '<div class="card g rc2' + (r.se ? ' seated' : r.ci ? ' arrived' : ' notyet') + '" data-id="' + r.id + '">' + (showTbl ? '<div class="tbl-badge" data-tbl="' + esc(tkey(r)) + '">' + esc(tname(tkey(r))) + '</div>' : '') +
       '<div class="g-main"><div class="g-name">' + esc(r.name) + '</div><div class="g-sub">' + esc(U.addrName(r)) + '</div><div class="g-meta">' + tags(r) +
-      (r.se ? '<span class="stc s-se">🪑 已入座 ' + T(r.se) + (r.seBy ? '（' + esc(r.seBy) + '）' : '') + '</span>' :
+      (r.se ? (r.seBy ? '<span class="stc s-none">入座登記：' + esc(r.seBy) + '</span>' : '') :
         r.ci ? '<span class="stc s-ci">✅ 已報到 ' + T(r.ci) + (w >= 5 ? ' ・ <b class="late">已等 ' + w + ' 分</b>' : '') + '</span>' : '<span class="stc s-none">⚪ 尚未報到</span>') +
       (r.note ? '<span class="note">📝 ' + esc(r.note) + '</span>' : '') + '</div></div><div class="g-act">';
-    if (r.se) h += '<button class="btn link" data-a="unse">復原入座</button>';
-    else if (r.ci) h += '<button class="btn ok xl" data-a="se">已入座</button>';
-    else h += '<button class="btn xl" data-a="senc">已入座<small>（尚未報到）</small></button>';
+    /* 動作鈕用「動詞」，已完成用「狀態徽章」，避免把「已入座」按鈕誤看成狀態 */
+    if (r.se) h += '<span class="seat-done">✅ 已入座 ' + T(r.se) + '</span><button class="btn link" data-a="unse">復原</button>';
+    else if (r.ci) h += '<button class="btn primary xl seat-go" data-a="se">確認入座</button>';
+    else h += '<button class="btn primary xl seat-go" data-a="senc">確認入座</button>';
     return h + '</div></div>';
   }
   function sortSeq(a, b) { return (a.seq || 99999) - (b.seq || 99999) || String(a.name).localeCompare(String(b.name)); }
@@ -171,11 +172,11 @@ V.printOrder = function () {
     } else if (st.t != null && tabs[st.t]) {
       var g = tabs[st.t].slice().sort(sortSeq), n = g.length, a = g.filter(function (r) { return r.ci; }).length, s = g.filter(function (r) { return r.se; }).length, wait = g.filter(function (r) { return r.ci && !r.se; }).length;
       top = '<div class="rc-head"><button class="btn" id="rc-back">‹ 所有桌次</button><div class="rc-title"><h3>🪑 ' + esc(tname(st.t)) + '</h3><div class="muted">共 <b>' + n + '</b> 位 ・ 已報到 <b>' + a + '</b> ・ 已入座 <b>' + s + '</b></div></div>' +
-        (wait ? '<button class="btn primary" id="rc-all">已報到的 ' + wait + ' 位全部入座</button>' : '<span class="stc s-se">' + (s === n && n ? '✓ 全桌已入座' : '') + '</span>') + '</div>';
+        (wait ? '<button class="btn primary" id="rc-all">已報到的 ' + wait + ' 位全部確認入座</button>' : '<span class="stc s-se">' + (s === n && n ? '✓ 全桌已入座' : '') + '</span>') + '</div>';
       out = g.map(function (r) { return gRow(r, false); }).join('');
     } else {
       if (st.t != null) st.t = null;
-      out = '<div class="rc-tip">👇 點選桌號，看這桌的貴賓名單，坐定後直接按「已入座」。</div><div class="tgrid rc-tiles">' + keys.map(function (k) {
+      out = '<div class="rc-tip">👇 點選桌號，看這桌的貴賓名單，貴賓坐定後，按該貴賓的「確認入座」。</div><div class="tgrid rc-tiles">' + keys.map(function (k) {
         var g = tabs[k], n = g.length, a = g.filter(function (r) { return r.ci; }).length, s = g.filter(function (r) { return r.se; }).length, wait = a - s;
         return '<div class="tt' + (s >= n && n ? ' full' : a ? ' part' : '') + '" role="button" tabindex="0" data-t="' + esc(k) + '"><div class="tt-n">' + esc(tname(k)) + '</div><div class="tt-v"><b>' + s + '</b>/' + n + '</div><div class="tt-s">' + (wait > 0 ? '<span class="warnc">待入座 ' + wait + '</span>' : '已報到 ' + a) + '</div><div class="tt-bar"><i class="a" style="width:' + (n ? a * 100 / n : 0) + '%"></i><i class="b" style="width:' + (n ? s * 100 / n : 0) + '%"></i></div></div>';
       }).join('') + '</div>' + (keys.length ? '' : '<div class="empty">目前沒有貴賓資料</div>');
@@ -197,14 +198,14 @@ V.printOrder = function () {
         if (e.target.closest('#rc-back')) { st.t = null; U.lsDel('vip.rcTbl'); upd(); return; }
         if (e.target.closest('#rc-all')) {
           var g = V.list().filter(function (x) { return tkey(x) === st.t && x.ci && !x.se; });
-          V.confirm('把「' + esc(tname(st.t)) + '」已報到的 ' + g.length + ' 位貴賓，全部標記為已入座？', '全部入座', false).then(function (ok) { if (ok) g.forEach(function (x) { V.stage(x.id, 'se', 1); }); });
+          V.confirm('把「' + esc(tname(st.t)) + '」已報到的 ' + g.length + ' 位貴賓，全部標記為已入座？', '確定全部入座', false).then(function (ok) { if (ok) g.forEach(function (x) { V.stage(x.id, 'se', 1); }); });
           return;
         }
         var b = e.target.closest('[data-a]'); if (!b) return;
         var id = b.closest('[data-id]').dataset.id, a = b.dataset.a, rec = byId(id);
         if (a === 'se') V.stage(id, 'se', 1);
         else if (a === 'unse') V.stage(id, 'se', 0);
-        else if (a === 'senc') V.confirm('「' + esc(rec ? rec.name : '') + '」尚未報到。<br>確定直接標記為已入座？（系統會同時補記報到）', '確定入座', false).then(function (ok) { if (ok) V.stage(id, 'se', 1, true); });
+        else if (a === 'senc') V.confirm(esc(rec ? rec.name : '') + ' 尚未報到。<br>確定直接標記為已入座？（系統會同時補記報到）', '確定入座', false).then(function (ok) { if (ok) V.stage(id, 'se', 1, true); });
       };
       r.onkeydown = function (e) { var t = e.target.closest && e.target.closest('[data-t]'); if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openT(t.dataset.t); } };
       this.timer = setInterval(upd, 30000);
